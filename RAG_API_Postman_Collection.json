@@ -1,0 +1,395 @@
+{
+  "info": {
+    "name": "DocRAG API",
+    "description": "Complete Postman collection for the DocRAG Document Question-Answering System.\n\nWorkflow:\n1. Register or Login → copy the access token\n2. Set the `access_token` collection variable\n3. Upload a document\n4. Ask a question against that document",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "version": "1.0.0"
+  },
+  "variable": [
+    { "key": "base_url",     "value": "http://localhost:8000", "type": "string" },
+    { "key": "access_token", "value": "",                      "type": "string" },
+    { "key": "refresh_token","value": "",                      "type": "string" },
+    { "key": "document_id",  "value": "",                      "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "Auth",
+      "description": "User registration, login, token refresh, logout, and profile.",
+      "item": [
+        {
+          "name": "Register",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/auth/register/", "host": ["{{base_url}}"], "path": ["api","auth","register",""] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"alice\",\n  \"email\": \"alice@example.com\",\n  \"password\": \"StrongPass123!\",\n  \"password_confirm\": \"StrongPass123!\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Creates a new user account. Passwords must match and satisfy Django's validators."
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "status": "Created",
+              "code": 201,
+              "body": "{\n  \"id\": \"uuid\",\n  \"username\": \"alice\",\n  \"email\": \"alice@example.com\",\n  \"question_count\": 0,\n  \"created_at\": \"2024-01-01T00:00:00Z\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var json = pm.response.json();",
+                  "if (json.access)  pm.collectionVariables.set('access_token',  json.access);",
+                  "if (json.refresh) pm.collectionVariables.set('refresh_token', json.refresh);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/auth/login/", "host": ["{{base_url}}"], "path": ["api","auth","login",""] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"alice\",\n  \"password\": \"StrongPass123!\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Logs in and returns JWT access + refresh tokens. The test script auto-saves both tokens to collection variables."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"access\": \"<jwt_access_token>\",\n  \"refresh\": \"<jwt_refresh_token>\",\n  \"user\": {\n    \"id\": \"uuid\",\n    \"username\": \"alice\",\n    \"email\": \"alice@example.com\",\n    \"question_count\": 0,\n    \"created_at\": \"2024-01-01T00:00:00Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Refresh Token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var json = pm.response.json();",
+                  "if (json.access) pm.collectionVariables.set('access_token', json.access);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/auth/refresh/", "host": ["{{base_url}}"], "path": ["api","auth","refresh",""] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refresh\": \"{{refresh_token}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Issues a new access token using the refresh token. Rotation is enabled, so a new refresh token is also returned."
+          }
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type",  "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": { "raw": "{{base_url}}/api/auth/logout/", "host": ["{{base_url}}"], "path": ["api","auth","logout",""] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refresh\": \"{{refresh_token}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Blacklists the refresh token, effectively logging the user out."
+          }
+        },
+        {
+          "name": "Me (Get Profile)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+            "url": { "raw": "{{base_url}}/api/auth/me/", "host": ["{{base_url}}"], "path": ["api","auth","me",""] },
+            "description": "Returns the currently authenticated user's profile."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"id\": \"uuid\",\n  \"username\": \"alice\",\n  \"email\": \"alice@example.com\",\n  \"question_count\": 5,\n  \"created_at\": \"2024-01-01T00:00:00Z\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Me (Update Profile)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type",  "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": { "raw": "{{base_url}}/api/auth/me/", "host": ["{{base_url}}"], "path": ["api","auth","me",""] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"alice_new@example.com\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Partially updates the authenticated user's profile (e.g. email)."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Documents",
+      "description": "Upload, list, inspect, and delete documents. Embeddings are generated asynchronously via Celery.",
+      "item": [
+        {
+          "name": "Upload Document",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var json = pm.response.json();",
+                  "if (json.id) pm.collectionVariables.set('document_id', json.id);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+            "url": { "raw": "{{base_url}}/api/documents/", "host": ["{{base_url}}"], "path": ["api","documents",""] },
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": [],
+                  "description": "Supported: .txt, .pdf, .xlsx, .xls, .csv"
+                }
+              ]
+            },
+            "description": "Uploads a document. The response `id` is auto-saved to `document_id` collection variable. Embedding is queued in Celery and status starts as `pending`."
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "status": "Created",
+              "code": 201,
+              "body": "{\n  \"id\": \"550e8400-e29b-41d4-a716-446655440000\",\n  \"file\": \"/media/uploads/user_uuid/report.pdf\",\n  \"file_name\": \"report.pdf\",\n  \"file_type\": \"pdf\",\n  \"status\": \"pending\",\n  \"created_at\": \"2024-01-01T10:00:00Z\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "List Documents",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/api/documents/?page=1&page_size=20",
+              "host": ["{{base_url}}"],
+              "path": ["api","documents",""],
+              "query": [
+                { "key": "page",       "value": "1",        "description": "Page number" },
+                { "key": "page_size",  "value": "20",       "description": "Items per page", "disabled": true },
+                { "key": "status",     "value": "completed","description": "Filter: pending | processing | completed | failed", "disabled": true },
+                { "key": "file_type",  "value": "pdf",      "description": "Filter by extension", "disabled": true },
+                { "key": "search",     "value": "report",   "description": "Search by file_name", "disabled": true },
+                { "key": "ordering",   "value": "-created_at","description": "Sort field", "disabled": true }
+              ]
+            },
+            "description": "Returns a paginated list of the authenticated user's documents. Supports filtering by `status`, `file_type`, full-text `search`, and `ordering`."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"count\": 2,\n  \"next\": null,\n  \"previous\": null,\n  \"results\": [\n    {\n      \"id\": \"uuid\",\n      \"file_name\": \"report.pdf\",\n      \"file_type\": \"pdf\",\n      \"status\": \"completed\",\n      \"created_at\": \"2024-01-01T10:00:00Z\"\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get Document Detail",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+            "url": { "raw": "{{base_url}}/api/documents/{{document_id}}/", "host": ["{{base_url}}"], "path": ["api","documents","{{document_id}}",""] },
+            "description": "Retrieves full detail for a single document. Returns 404 if the document belongs to another user."
+          }
+        },
+        {
+          "name": "Get Document Status",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+            "url": { "raw": "{{base_url}}/api/documents/{{document_id}}/status/", "host": ["{{base_url}}"], "path": ["api","documents","{{document_id}}","status",""] },
+            "description": "Lightweight polling endpoint. Returns `status` and a human-readable `status_description`."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"id\": \"uuid\",\n  \"file_name\": \"report.pdf\",\n  \"status\": \"completed\",\n  \"created_at\": \"2024-01-01T10:00:00Z\",\n  \"status_description\": \"Ready for Q&A\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get Document Chunks (Debug)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+            "url": { "raw": "{{base_url}}/api/documents/{{document_id}}/chunks/", "host": ["{{base_url}}"], "path": ["api","documents","{{document_id}}","chunks",""] },
+            "description": "Debug endpoint. Queries PGVector and returns the chunks stored for this document with their metadata. Requires Ollama to be running."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"document_id\": \"uuid\",\n  \"total_chunks_found\": 12,\n  \"chunks\": [\n    {\n      \"content\": \"Machine learning is a subset...\",\n      \"metadata\": {\n        \"document_id\": \"uuid\",\n        \"user_id\": \"uuid\",\n        \"file_name\": \"report.pdf\",\n        \"page\": 1,\n        \"chunk_index\": 0\n      }\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "Delete Document",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+            "url": { "raw": "{{base_url}}/api/documents/{{document_id}}/", "host": ["{{base_url}}"], "path": ["api","documents","{{document_id}}",""] },
+            "description": "Permanently deletes the document. Returns 404 if the document belongs to another user."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"message\": \"Document deleted successfully\",\n  \"details\": {\n    \"id\": \"uuid\",\n    \"file_name\": \"report.pdf\"\n  }\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "QA",
+      "description": "Question answering (standard + streaming) and activity history.",
+      "item": [
+        {
+          "name": "Ask Question",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type",  "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": { "raw": "{{base_url}}/api/qa/ask/", "host": ["{{base_url}}"], "path": ["api","qa","ask",""] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"question\": \"What is retrieval-augmented generation?\",\n  \"document_id\": \"{{document_id}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Synchronous Q&A. Embeds the question, retrieves relevant chunks from PGVector, reranks with Gemma4, and generates an answer.\n\nOptional fields:\n- `document_id` — restrict search to one document\n- `page` — filter by page number\n- `chunk_index` — filter by chunk index"
+          },
+          "response": [
+            {
+              "name": "200 OK — Answer found",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"answer\": \"Retrieval-Augmented Generation (RAG) combines...\",\n  \"sources\": [\n    {\n      \"file_name\": \"report.pdf\",\n      \"page\": 1,\n      \"chunk_index\": 2,\n      \"excerpt\": \"RAG combines retrieval systems...\"\n    }\n  ],\n  \"response_time_ms\": 842,\n  \"status\": \"success\"\n}"
+            },
+            {
+              "name": "200 OK — No relevant docs",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"answer\": \"I could not find relevant information in your documents.\",\n  \"sources\": [],\n  \"status\": \"no_answer\"\n}"
+            },
+            {
+              "name": "400 Bad Request — Missing question",
+              "status": "Bad Request",
+              "code": 400,
+              "body": "{\n  \"error\": \"Question is required\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Ask Question (Filtered)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type",  "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": { "raw": "{{base_url}}/api/qa/ask/", "host": ["{{base_url}}"], "path": ["api","qa","ask",""] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"question\": \"What does page 3 say about embeddings?\",\n  \"document_id\": \"{{document_id}}\",\n  \"page\": 3,\n  \"chunk_index\": 0\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Same as Ask Question but with optional `page` and `chunk_index` filters to narrow the vector search."
+          }
+        },
+        {
+          "name": "Stream Answer",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type",  "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": { "raw": "{{base_url}}/api/qa/stream/", "host": ["{{base_url}}"], "path": ["api","qa","stream",""] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"question\": \"Summarise the key findings.\",\n  \"document_id\": \"{{document_id}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Streaming endpoint. Returns `application/x-ndjson` — one JSON object per line, each containing a `token` field.\n\nExample stream lines:\n```\n{\"token\": \"The \"}\n{\"token\": \"key \"}\n{\"token\": \"findings \"}\n```\n\nNote: Postman displays the full body once the stream completes. Use a browser / curl for real-time streaming."
+          }
+        },
+        {
+          "name": "Get Activity History",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/api/qa/activity/?page=1&page_size=20",
+              "host": ["{{base_url}}"],
+              "path": ["api","qa","activity",""],
+              "query": [
+                { "key": "page",        "value": "1",        "description": "Page number" },
+                { "key": "page_size",   "value": "20",       "description": "Items per page" },
+                { "key": "status",      "value": "success",  "description": "Filter: success | no_answer | error", "disabled": true },
+                { "key": "document_id", "value": "{{document_id}}", "description": "Filter by document", "disabled": true }
+              ]
+            },
+            "description": "Returns paginated Q&A history for the authenticated user with stats (total questions, questions today)."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"total_questions\": 42,\n  \"questions_today\": 5,\n  \"page\": 1,\n  \"page_size\": 20,\n  \"total_pages\": 3,\n  \"activities\": [\n    {\n      \"id\": 1,\n      \"question\": \"What is RAG?\",\n      \"answer\": \"RAG stands for...\",\n      \"document_id\": \"uuid\",\n      \"sources_count\": 3,\n      \"response_time_ms\": 842,\n      \"status\": \"success\",\n      \"created_at\": \"2024-01-01T12:00:00Z\"\n    }\n  ]\n}"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

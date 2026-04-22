@@ -163,10 +163,10 @@ CELERY_ENABLE_UTC = True
 
 # Ollama
 OLLAMA_BASE_URL = env("OLLAMA_BASE_URL", default="http://localhost:11434")
-OLLAMA_EMBED_MODEL = env("OLLAMA_EMBED_MODEL", default="nomic-embed-text")
-OLLAMA_CHAT_MODEL = env("OLLAMA_CHAT_MODEL", default="gemma4:e4b")
+OLLAMA_EMBED_MODEL = env("OLLAMA_EMBED_MODEL", default="embeddinggemma")
+OLLAMA_CHAT_MODEL = env("OLLAMA_CHAT_MODEL", default="gemma4")
 
 # Chunking defaults (used by Day 2 pipeline)
-CHUNK_SIZE = 500        # tokens (approximate via char count)
-CHUNK_OVERLAP = 50      # tokens overlap between chunks
-TOP_K_CHUNKS = 5        # chunks retrieved per QA query
+CHUNK_SIZE = env.int("CHUNK_SIZE", default=500)
+CHUNK_OVERLAP = env.int("CHUNK_OVERLAP", default=50)
+TOP_K_CHUNKS = env.int("TOP_K_CHUNKS", default=5)

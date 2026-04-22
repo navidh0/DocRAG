@@ -1,6 +1,8 @@
 import pytest
 import os
 import uuid
+from django.utils.timezone import now
+from datetime import timedelta
 from rest_framework.test import APIClient
 from django.contrib.auth import get_user_model
 from documents.models import Document
@@ -145,11 +147,30 @@ class TestDocumentListing:
         assert "annual_report" in res.data['results'][0]['file_name']
 
     def test_ordering_by_date(self):
-        Document.objects.create(user=self.user, file_name="old.pdf", file_type="pdf", status="completed")
-        Document.objects.create(user=self.user, file_name="new.pdf", file_type="pdf", status="completed")
+        old_doc = Document.objects.create(
+            user=self.user,
+            file_name="old.pdf",
+            file_type="pdf",
+            status="completed",
+            created_at=now() - timedelta(seconds=10),
+        )
+
+        new_doc = Document.objects.create(
+            user=self.user,
+            file_name="new.pdf",
+            file_type="pdf",
+            status="completed",
+            created_at=now(),
+        )
+
         res = self.client.get('/api/documents/?ordering=-created_at')
+
         assert res.status_code == 200
-        assert res.data['results'][0]['file_name'] == "new.pdf"
+
+        results = res.data['results']
+        filenames = [doc['file_name'] for doc in results]
+
+        assert filenames == ["new.pdf", "old.pdf"]
 
 
 @pytest.mark.django_db

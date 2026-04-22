@@ -125,4 +125,4 @@ class DocumentChunksDebugView(APIView):
                 "chunks": [{"content": c.page_content[:150], "metadata": c.metadata} for c in chunks]
             })
         except Exception as e:
-            return Response({"error": str(e)}, status=500)
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

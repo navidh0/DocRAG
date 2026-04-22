@@ -7,6 +7,7 @@ from django.http import StreamingHttpResponse
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
+from rest_framework import status
 from langchain_postgres import PGVector
 from django.utils import timezone
 from .models import QuestionActivity
@@ -35,7 +36,7 @@ class QuestionAnsweringView(APIView):
         start_time = time.time()
 
         if not question or question.strip() == "":
-            return Response({"error": "Question is required"}, status=400)
+            return Response({"error": "Question is required"}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
             # 1. Generate query embedding
@@ -70,7 +71,7 @@ class QuestionAnsweringView(APIView):
                 try:
                     search_filter["page"] = int(page_filter) - 1
                 except (ValueError, TypeError):
-                    return Response({"error": "Invalid page number"}, status=400)
+                    return Response({"error": "Invalid page number"}, status=status.HTTP_400_BAD_REQUEST)
 
             # 4. Retrieve relevant chunks
             docs = store.similarity_search_by_vector(
@@ -91,12 +92,39 @@ class QuestionAnsweringView(APIView):
             docs = reranked_docs if reranked_docs else docs[:3]
 
             # 6. Generate answer
-            context = "\n\n".join([d.page_content for d in docs])
-            prompt = f"""Context: {context}
+            context_parts = []
+            for d in docs:
+                meta = d.metadata
+                context_parts.append(
+                    f"[Document: {meta.get('file_name', 'Unknown')} | Page: {meta.get('page', 0) + 1} | Chunk: {meta.get('chunk_index', 0)}]\n"
+                    f"{d.page_content}"
+                )
 
-    Question: {question}
+            context = "\n\n".join(context_parts)
+            prompt = f"""
+                You are a document question-answering assistant.
 
-    Answer the question based ONLY on the context provided. If the context does not contain enough information, say so."""
+                IMPORTANT RULES:
+                - The context consists of retrieved chunks from documents.
+                - Each chunk includes metadata like [Page: X].
+                - Multiple chunks from the same page together represent that page.
+                - The context may be partial, but you MUST use it to answer.
+
+                STRICT INSTRUCTIONS:
+                - Answer ONLY using the provided context.
+                - If the question refers to a specific page (e.g., "page 2"), use the metadata.
+                - DO NOT say the page does not exist if chunks from that page are present.
+                - If information is partial, provide the best possible answer.
+                - If truly not enough information exists, say: "Not available in the provided documentation."
+
+                Context:
+                {context}
+
+                Question:
+                {question}
+
+                Answer:
+                """
 
             response = client.generate(
                 model=os.getenv("LLM_MODEL", "gemma4:e4b"),
@@ -154,7 +182,7 @@ class QuestionAnsweringView(APIView):
             return Response({
                 "error": "An error occurred while processing your question.",
                 "status": "error"
-            }, status=500)
+            }, status=status.HTTP_400_BAD_REQUEST)
 
 class ChatStreamView(APIView):
     permission_classes = [IsAuthenticated]

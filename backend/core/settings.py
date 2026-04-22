@@ -39,7 +39,7 @@ THIRD_PARTY_APPS = [
 LOCAL_APPS = [
     "accounts",
     "documents",
-    "qa",
+    "qa.apps.QaConfig",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS

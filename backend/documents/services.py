@@ -35,7 +35,7 @@ class DocumentNotFoundError(DocumentsServicesError):
 class DocumentProcessingError(DocumentsServicesError):
     """Raised when document processing fails (e.g., file format invalid)."""
     status_code = status.HTTP_400_BAD_REQUEST
-    
+
 
 # =========================
 # CREATE DOCUMENT

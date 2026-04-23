@@ -4,6 +4,7 @@ import ollama
 from django.db import transaction
 from django.core.exceptions import ObjectDoesNotExist
 from django.conf import settings
+from rest_framework import status
 
 from langchain_postgres import PGVector
 from langchain_community.document_loaders import PyMuPDFLoader, UnstructuredExcelLoader
@@ -13,6 +14,28 @@ from langchain_core.documents import Document as LCDocument
 from .models import Document
 from .utils import get_vector_store_connection
 
+# =========================
+# ERROR HANDLING
+# =========================
+class DocumentsServicesError(Exception):
+    """Base exception class for all document service specific errors."""
+    
+    status_code = status.HTTP_400_BAD_REQUEST
+    
+    def __init__(self, message, status_code=None, details=None):
+        super().__init__(message)
+        self.message = message
+        self.details = details or {}
+        if status_code is not None:
+            self.status_code = status_code
+class DocumentNotFoundError(DocumentsServicesError):
+    """Raised when a specific document ID cannot be found."""
+    status_code = status.HTTP_404_NOT_FOUND
+
+class DocumentProcessingError(DocumentsServicesError):
+    """Raised when document processing fails (e.g., file format invalid)."""
+    status_code = status.HTTP_400_BAD_REQUEST
+    
 
 # =========================
 # CREATE DOCUMENT

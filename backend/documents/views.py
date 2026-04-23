@@ -9,6 +9,9 @@ from .models import Document
 from .serializers import DocumentSerializer
 from .tasks import process_document_embedding
 from .utils import get_vector_store_connection
+from .services import (
+    CreateDocumentService
+)
 
 class DocumentListCreateView(generics.ListCreateAPIView):
     serializer_class = DocumentSerializer
@@ -20,18 +23,13 @@ class DocumentListCreateView(generics.ListCreateAPIView):
     ordering = ['-created_at']
 
     def get_queryset(self):
-        # Strictly isolate data to the authenticated user
         return Document.objects.filter(user=self.request.user)
 
-    def perform_create(self, serializer):
-        # Assign user and save
-        doc = serializer.save(user=self.request.user)
-        
-        # Trigger Celery task using the UUID string
-        try:
-            transaction.on_commit(lambda: process_document_embedding.delay(str(doc.id)))
-        except Exception as e:
-            print(f"[ERROR] Failed to queue embedding task for {doc.id}: {e}")
+    def perform_create(self, serializer): 
+        CreateDocumentService.execute(
+            user=self.request.user, validated_data=serializer.validated_data
+            )
+        serializer.save(user=self.request.user)
 
 
 class DocumentRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):

@@ -9,13 +9,17 @@ from django.db import transaction
 from django_filters.rest_framework import DjangoFilterBackend
 from langchain_postgres import PGVector
 from .models import Document
-from .serializers import DocumentSerializer
+
 from .tasks import process_document_embedding
 from .utils import get_vector_store_connection
 from .services import (
-    CreateDocumentService
+    CreateDocumentService,
+    GetDocumentStatusService,
 )
-
+from .serializers import (
+    DocumentSerializer,
+    DocumentStatusOutputSerializer,
+)
 class DocumentListCreateView(generics.ListCreateAPIView):
     serializer_class = DocumentSerializer
     permission_classes = [IsAuthenticated]
@@ -62,19 +66,14 @@ class DocumentRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
 
 class DocumentStatusView(APIView):
     permission_classes = [IsAuthenticated]
-    
+
     def get(self, request, id):
-        try:
-            doc = Document.objects.get(id=id, user=request.user)
-            return Response({
-                "id": str(doc.id),
-                "file_name": doc.file_name,
-                "status": doc.status,
-                "created_at": doc.created_at.isoformat(),
-                "status_description": self.get_status_description(doc.status)
-            }, status=status.HTTP_200_OK)
-        except Document.DoesNotExist:
-            return Response({"error": "Document not found"}, status=status.HTTP_404_NOT_FOUND)
+        data = GetDocumentStatusService.execute(
+            user=request.user,
+            document_id=id,
+        )
+        output = DocumentStatusOutputSerializer(data)
+        return Response(output.data, status=status.HTTP_200_OK)
     
     @staticmethod
     def get_status_description(doc_status):

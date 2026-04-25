@@ -5,12 +5,9 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.conf import settings
-from django.db import transaction
 from django_filters.rest_framework import DjangoFilterBackend
 from langchain_postgres import PGVector
-from .models import Document
 
-from .tasks import process_document_embedding
 from .utils import get_vector_store_connection
 from .services import (
     CreateDocumentService,
@@ -21,13 +18,14 @@ from .serializers import (
     DocumentSerializer,
     DocumentStatusOutputSerializer,
     DocumentOutputSerializer,
+    DocumentUploadInputSerializer,
 )
 from .selectors import(
     document_list,
 )
 
 class DocumentListCreateView(generics.ListCreateAPIView):
-    serializer_class = DocumentSerializer
+    serializer_class = DocumentOutputSerializer
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['file_type', 'status']
@@ -36,14 +34,17 @@ class DocumentListCreateView(generics.ListCreateAPIView):
     ordering = ['-created_at']
 
     def get_queryset(self):
-        return Document.objects.filter(user=self.request.user)
+        return document_list(user=self.request.user)
 
-    def perform_create(self, serializer): 
-        CreateDocumentService.execute(
-            user=self.request.user, validated_data=serializer.validated_data
-            )
-        serializer.save(user=self.request.user)
-
+    def create(self, request, *args, **kwargs):
+        input_ser = DocumentUploadInputSerializer(data=request.data)
+        input_ser.is_valid(raise_exception=True)
+        doc = CreateDocumentService.execute(
+            user=request.user,
+            validated_data=input_ser.validated_data,
+        )
+        output_ser = DocumentOutputSerializer(doc)
+        return Response(output_ser.data, status=status.HTTP_201_CREATED)
 
 class DocumentRetrieveDestroyView(generics.RetrieveDestroyAPIView):
     serializer_class = DocumentOutputSerializer

@@ -2,7 +2,6 @@ import os
 import ollama
 
 from django.db import transaction
-from django.core.exceptions import ObjectDoesNotExist
 from django.conf import settings
 from rest_framework import status
 
@@ -19,7 +18,6 @@ from .utils import get_vector_store_connection
 # =========================
 class DocumentsServicesError(Exception):
     """Base exception class for all document service specific errors."""
-    
     status_code = status.HTTP_400_BAD_REQUEST
     
     def __init__(self, message, status_code=None, details=None):
@@ -28,6 +26,7 @@ class DocumentsServicesError(Exception):
         self.details = details or {}
         if status_code is not None:
             self.status_code = status_code
+
 class DocumentNotFoundError(DocumentsServicesError):
     """Raised when a specific document ID cannot be found."""
     status_code = status.HTTP_404_NOT_FOUND
@@ -62,16 +61,18 @@ class CreateDocumentService:
 class DeleteDocumentService:
     @staticmethod
     def execute(*, user, document_id):
-        doc = Document.objects.get(id=document_id, user=user)
+        try:
+            doc = Document.objects.get(id=document_id, user=user)
+        except Document.DoesNotExist:
+            raise DocumentNotFoundError("Document not found")
 
         data = {
             "id": str(doc.id),
-            "file_name": doc.file_name
+            "file_name": doc.file_name,
         }
 
         doc.delete()
         return data
-
 
 # =========================
 # DOCUMENT STATUS
@@ -90,17 +91,16 @@ class GetDocumentStatusService:
     def execute(cls, *, user, document_id):
         try:
             doc = Document.objects.get(id=document_id, user=user)
-        except ObjectDoesNotExist:
-            return None
+        except Document.DoesNotExist:
+            raise DocumentNotFoundError("Document not found")
 
         return {
             "id": str(doc.id),
             "file_name": doc.file_name,
             "status": doc.status,
             "created_at": doc.created_at.isoformat(),
-            "status_description": cls.STATUS_DESCRIPTIONS.get(doc.status, "Unknown")
+            "status_description": cls.STATUS_DESCRIPTIONS.get(doc.status, "Unknown"),
         }
-
 
 # =========================
 # DEBUG CHUNKS

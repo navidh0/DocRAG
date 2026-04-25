@@ -1,4 +1,3 @@
-import os
 import ollama
 
 from django.db import transaction
@@ -109,47 +108,34 @@ class GetDocumentStatusService:
 class DebugDocumentChunksService:
     @staticmethod
     def execute(*, user, document_id):
-        connection = get_vector_store_connection()
+        from django.db import connection, ProgrammingError
 
-        store = PGVector(
-            collection_name="rag_collection",
-            connection=connection,
-            embeddings=None,
-            use_jsonb=True,
-        )
-
-        client = ollama.Client(host=settings.OLLAMA_BASE_URL)
-
-        response = client.embed(
-            model=settings.OLLAMA_EMBED_MODEL,
-            input="document"
-        )
-
-        query_vector = response['embeddings'][0]
+        sql = """
+            SELECT cmetadata, document
+            FROM langchain_pg_embedding
+            WHERE cmetadata->>'document_id' = %s
+              AND cmetadata->>'user_id' = %s
+        """
         try:
-            chunks = store.similarity_search_by_vector(
-                embedding=query_vector,
-                k=settings.TOP_K_CHUNKS,
-                filter={
-                    "document_id": str(document_id),
-                    "user_id": str(user.id)
-                }
-            )
-        except Exception as e:
-            raise RuntimeError(f"Vector search failed: {e}")
-        
+            with connection.cursor() as cursor:
+                cursor.execute(sql, [str(document_id), str(user.id)])
+                rows = cursor.fetchall()
+        except ProgrammingError as e:
+            if 'langchain_pg_embedding' not in str(e):
+                raise
+            rows = []
+
         return {
-            "document_id": document_id,
-            "total_chunks_found": len(chunks),
+            "document_id": str(document_id),
+            "total_chunks_found": len(rows),
             "chunks": [
                 {
-                    "content": c.page_content[:150],
-                    "metadata": c.metadata
+                    "content": (row[1] or "")[:150],
+                    "metadata": row[0],
                 }
-                for c in chunks
-            ]
+                for row in rows
+            ],
         }
-
 
 # =========================
 # PROCESS DOCUMENT (CORE)

@@ -15,11 +15,17 @@ from .utils import get_vector_store_connection
 from .services import (
     CreateDocumentService,
     GetDocumentStatusService,
+    DeleteDocumentService,
 )
 from .serializers import (
     DocumentSerializer,
     DocumentStatusOutputSerializer,
+    DocumentOutputSerializer,
 )
+from .selectors import(
+    document_list,
+)
+
 class DocumentListCreateView(generics.ListCreateAPIView):
     serializer_class = DocumentSerializer
     permission_classes = [IsAuthenticated]
@@ -39,28 +45,22 @@ class DocumentListCreateView(generics.ListCreateAPIView):
         serializer.save(user=self.request.user)
 
 
-class DocumentRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
-    serializer_class = DocumentSerializer
+class DocumentRetrieveDestroyView(generics.RetrieveDestroyAPIView):
+    serializer_class = DocumentOutputSerializer
     permission_classes = [IsAuthenticated]
     lookup_field = 'id'
 
     def get_queryset(self):
-        return Document.objects.filter(user=self.request.user)
+        return document_list(user=self.request.user)
 
     def destroy(self, request, *args, **kwargs):
-        """Override to provide a response body on deletion."""
-        instance = self.get_object()
-        doc_id = instance.id
-        file_name = instance.file_name
-        
-        self.perform_destroy(instance)
-        
+        data = DeleteDocumentService.execute(
+            user=request.user,
+            document_id=kwargs['id'],
+        )
         return Response({
             "message": "Document deleted successfully",
-            "details": {
-                "id": str(doc_id),
-                "file_name": file_name
-            }
+            "details": data,
         }, status=status.HTTP_200_OK)
 
 

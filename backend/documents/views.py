@@ -2,8 +2,12 @@ from rest_framework import generics, filters, status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.parsers import MultiPartParser, FormParser
 from django_filters.rest_framework import DjangoFilterBackend
-
+from drf_spectacular.utils import (
+    extend_schema, 
+    OpenApiResponse, 
+)
 from .services import (
     CreateDocumentService,
     GetDocumentStatusService,
@@ -19,9 +23,26 @@ from .selectors import(
     document_list,
 )
 
+@extend_schema(
+    methods=['POST'],
+    request={
+        'multipart/form-data': {
+            'type': 'object',
+            'properties': {
+                'file': {
+                    'type': 'string',
+                    'format': 'binary',
+                },
+            },
+            'required': ['file'],
+        }
+    },
+    responses={201: DocumentOutputSerializer},
+)
 class DocumentListCreateView(generics.ListCreateAPIView):
     serializer_class = DocumentOutputSerializer
     permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['file_type', 'status']
     search_fields = ['file_name']
@@ -30,7 +51,7 @@ class DocumentListCreateView(generics.ListCreateAPIView):
 
     def get_queryset(self):
         return document_list(user=self.request.user)
-
+    
     def create(self, request, *args, **kwargs):
         input_ser = DocumentUploadInputSerializer(data=request.data)
         input_ser.is_valid(raise_exception=True)
@@ -41,6 +62,17 @@ class DocumentListCreateView(generics.ListCreateAPIView):
         output_ser = DocumentOutputSerializer(doc)
         return Response(output_ser.data, status=status.HTTP_201_CREATED)
 
+@extend_schema(
+    methods=['DELETE'],
+    responses={
+        200: OpenApiResponse(description="Document deleted successfully"),
+        404: OpenApiResponse(description="Document not found"),
+    },
+)
+@extend_schema(
+    methods=['GET'],
+    responses={200: DocumentOutputSerializer},
+)
 class DocumentRetrieveDestroyView(generics.RetrieveDestroyAPIView):
     serializer_class = DocumentOutputSerializer
     permission_classes = [IsAuthenticated]
@@ -59,10 +91,15 @@ class DocumentRetrieveDestroyView(generics.RetrieveDestroyAPIView):
             "details": data,
         }, status=status.HTTP_200_OK)
 
-
 class DocumentStatusView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        responses={
+            200: DocumentStatusOutputSerializer,
+            404: OpenApiResponse(description="Document not found"),
+        }
+    )
     def get(self, request, id):
         data = GetDocumentStatusService.execute(
             user=request.user,
@@ -81,11 +118,15 @@ class DocumentStatusView(APIView):
         }
         return descriptions.get(doc_status, 'Unknown status')
 
-
 class DocumentChunksDebugView(APIView):
     """Utility to verify chunks exist in the vector database."""
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        responses={
+            200: OpenApiResponse(description="List of chunks for the document"),
+        }
+    )
     def get(self, request, id):
         data = DebugDocumentChunksService.execute(
             user=request.user,

@@ -1,5 +1,11 @@
+from __future__ import annotations
+
+from typing import Any, cast
+from uuid import UUID
+
 from rest_framework import status
 from rest_framework.views import APIView
+from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.parsers import MultiPartParser, FormParser
@@ -28,8 +34,13 @@ class DocumentListCreateView(APIView):
     parser_classes = [MultiPartParser, FormParser]
 
     @extend_schema(responses={200: DocumentOutputSerializer(many=True)})
-    def get(self, request):
-        documents = document_list(user=request.user, filters=request.query_params)
+    def get(self, request: Request) -> Response:
+
+        documents = document_list(
+            user=request.user, 
+            filters=cast(dict[str, str], request.query_params.dict())
+            )
+        
         paginator = PageNumberPagination()
         paginated_qs = paginator.paginate_queryset(documents, request, view=self)
         output = DocumentOutputSerializer(paginated_qs, many=True)
@@ -49,12 +60,12 @@ class DocumentListCreateView(APIView):
         },
         responses={201: DocumentOutputSerializer},
     )
-    def post(self, request):
+    def post(self, request: Request) -> Response:
         input_ser = DocumentUploadInputSerializer(data=request.data)
         input_ser.is_valid(raise_exception=True)
         doc = CreateDocumentService.execute(
             user=request.user,
-            validated_data=input_ser.validated_data,
+            validated_data=cast(dict[str, Any], input_ser.validated_data),
         )
         output = DocumentOutputSerializer(doc)
         return Response(output.data, status=status.HTTP_201_CREATED)
@@ -62,7 +73,7 @@ class DocumentListCreateView(APIView):
 class DocumentRetrieveDestroyView(APIView):
 
     @extend_schema(responses={200: DocumentOutputSerializer})
-    def get(self, request, id):
+    def get(self, request: Request, id: UUID) -> Response:
         doc = document_get(user=request.user, document_id=id)
         output = DocumentOutputSerializer(doc)
         return Response(output.data, status=status.HTTP_200_OK)
@@ -73,7 +84,7 @@ class DocumentRetrieveDestroyView(APIView):
             404: OpenApiResponse(description="Document not found"),
         }
     )
-    def delete(self, request, id):
+    def delete(self, request: Request, id: UUID) -> Response:
         data = DeleteDocumentService.execute(user=request.user, document_id=id)
         return Response(
             {"message": "Document deleted successfully", "details": data},
@@ -89,7 +100,7 @@ class DocumentStatusView(APIView):
             404: OpenApiResponse(description="Document not found"),
         }
     )
-    def get(self, request, id):
+    def get(self, request: Request, id: UUID) -> Response:
         data = GetDocumentStatusService.execute(
             user=request.user,
             document_id=id,
@@ -99,7 +110,7 @@ class DocumentStatusView(APIView):
     
     @staticmethod
     def get_status_description(doc_status):
-        descriptions = {
+        descriptions: dict[str, str] = {
             'pending': 'Waiting to be processed',
             'processing': 'Extracting text and generating embeddings...',
             'completed': 'Ready for Q&A',
@@ -116,7 +127,7 @@ class DocumentChunksDebugView(APIView):
             200: OpenApiResponse(description="List of chunks for the document"),
         }
     )
-    def get(self, request, id):
+    def get(self, request: Request, id: UUID) -> Response:
         data = DebugDocumentChunksService.execute(
             user=request.user,
             document_id=id,

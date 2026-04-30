@@ -1,6 +1,5 @@
 # qa/selectors.py
 from __future__ import annotations
-
 from typing import TYPE_CHECKING
 from uuid import UUID
 

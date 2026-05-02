@@ -64,11 +64,10 @@ class ChatStreamView(APIView):
             validated_data=validated_data,
         )
         return StreamingHttpResponse(
-            generator,
+            (chunk.encode("utf-8") for chunk in generator),
             content_type="application/x-ndjson",
             status=status.HTTP_200_OK,
         )
-
 
 class QuestionActivityListView(APIView):
     permission_classes = [IsAuthenticated]

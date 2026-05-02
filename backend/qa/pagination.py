@@ -1,8 +1,9 @@
 from __future__ import annotations
+from typing import Any
 
+from rest_framework import status
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
-
 
 class QuestionActivityPagination(PageNumberPagination):
     """
@@ -22,8 +23,9 @@ class QuestionActivityPagination(PageNumberPagination):
     """
 
     page_size_query_param = "page_size"
+    _questions_today: int = 0
 
-    def get_paginated_response(self, data: list) -> Response:
+    def get_paginated_response(self, data: Any) -> Response:
         return Response(
             {
                 "total_questions": self.page.paginator.count,
@@ -32,5 +34,6 @@ class QuestionActivityPagination(PageNumberPagination):
                 "page_size": self.get_page_size(self.request),
                 "total_pages": self.page.paginator.num_pages,
                 "activities": data,
-            }
+            },
+            status=status.HTTP_200_OK,
         )

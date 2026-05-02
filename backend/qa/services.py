@@ -1,4 +1,5 @@
 from __future__ import annotations
+from typing import Any
 
 import json
 import logging
@@ -74,7 +75,7 @@ class ProcessQuestionService:
             store = PGVector(
                 collection_name="rag_collection",
                 connection=connection,
-                embeddings=None,
+                embeddings=None,   # type: ignore[arg-type]
                 use_jsonb=True,
             )
             search_filter: dict = {"user_id": str(user_id)}
@@ -215,7 +216,8 @@ class AskQuestionService:
         from .tasks import process_question_task
 
         doc_id = validated_data.get("document_id")
-        task = process_question_task.delay(
+        celery_task: Any = process_question_task  # Celery decorates .delay() at runtime
+        task = celery_task.delay(
             question=validated_data["question"],
             user_id=str(user.id),
             doc_id=str(doc_id) if doc_id else None,

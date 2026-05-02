@@ -92,7 +92,7 @@ class StreamOptimizer:
         store = PGVector(
             collection_name="rag_collection",
             connection=connection,
-            embeddings=None,
+            embeddings=None,    # type: ignore[arg-type]
             use_jsonb=True,
         )
         search_filter: dict = {"user_id": str(user_id)}

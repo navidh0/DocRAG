@@ -172,3 +172,8 @@ OLLAMA_CHAT_MODEL = env("OLLAMA_CHAT_MODEL", default="gemma4")
 CHUNK_SIZE = env.int("CHUNK_SIZE", default=500)
 CHUNK_OVERLAP = env.int("CHUNK_OVERLAP", default=50)
 TOP_K_CHUNKS = env.int("TOP_K_CHUNKS", default=5)
+
+# Reranking
+RERANK_TOP_K = env.int("RERANK_TOP_K", default=3)
+RERANK_BM25_WEIGHT = env.float("RERANK_BM25_WEIGHT", default=0.4)
+RERANK_LLM_WEIGHT = env.float("RERANK_LLM_WEIGHT", default=0.6)

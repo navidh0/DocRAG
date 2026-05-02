@@ -1,4 +1,3 @@
-# qa/services.py
 from __future__ import annotations
 
 import json
@@ -28,6 +27,7 @@ logger = logging.getLogger(__name__)
 # Internal utility service
 # ---------------------------------------------------------------------------
 
+
 class IncrementQuestionCountService:
     @staticmethod
     def execute(*, user_id: str) -> None:
@@ -41,6 +41,7 @@ class IncrementQuestionCountService:
 # ---------------------------------------------------------------------------
 # ProcessQuestionService — full RAG pipeline, called by Celery task
 # ---------------------------------------------------------------------------
+
 
 class ProcessQuestionService:
     @staticmethod
@@ -76,7 +77,7 @@ class ProcessQuestionService:
                 embeddings=None,
                 use_jsonb=True,
             )
-            search_filter = {"user_id": str(user_id)}
+            search_filter: dict = {"user_id": str(user_id)}
             if doc_id:
                 search_filter["document_id"] = str(doc_id)
             if page_filter is not None:
@@ -120,7 +121,8 @@ class ProcessQuestionService:
             reranked_docs = HybridReranker().rerank(question=question, documents=docs)
         except Exception as exc:
             logger.warning(
-                "[ProcessQuestionService] Reranking failed, falling back to top-%d. Error: %s",
+                "[ProcessQuestionService] Reranking failed, falling back to top-%d. "
+                "Error: %s",
                 settings.RERANK_TOP_K,
                 exc,
             )
@@ -169,12 +171,14 @@ class ProcessQuestionService:
         for doc in reranked_docs:
             meta = doc.metadata
             excerpt = doc.page_content
-            sources.append({
-                "file_name": meta.get("file_name", "Unknown"),
-                "page": meta.get("page", 0) + 1,
-                "chunk_index": meta.get("chunk_index", 0),
-                "excerpt": (excerpt[:200] + "...") if len(excerpt) > 200 else excerpt,
-            })
+            sources.append(
+                {
+                    "file_name": meta.get("file_name", "Unknown"),
+                    "page": meta.get("page", 0) + 1,
+                    "chunk_index": meta.get("chunk_index", 0),
+                    "excerpt": (excerpt[:200] + "...") if len(excerpt) > 200 else excerpt,
+                }
+            )
 
         execution_time = int((time.time() - start_time) * 1000)
 
@@ -204,6 +208,7 @@ class ProcessQuestionService:
 # AskQuestionService — submits Celery task, returns task_id immediately
 # ---------------------------------------------------------------------------
 
+
 class AskQuestionService:
     @staticmethod
     def execute(*, user, validated_data: dict) -> dict:
@@ -222,6 +227,7 @@ class AskQuestionService:
 # ---------------------------------------------------------------------------
 # GetQuestionResultService — polls Celery result backend
 # ---------------------------------------------------------------------------
+
 
 class GetQuestionResultService:
     @staticmethod
@@ -252,17 +258,20 @@ class GetQuestionResultService:
 
 
 # ---------------------------------------------------------------------------
-# StreamQuestionService — returns a generator, view wraps in StreamingHttpResponse
+# StreamQuestionService — returns a generator for StreamingHttpResponse
 # ---------------------------------------------------------------------------
+
 
 class StreamQuestionService:
     @staticmethod
     def execute(*, user, validated_data: dict):
         """
         Returns a generator of NDJSON strings.
-        All side effects (QuestionActivity creation, count increment) happen
-        inside the generator so they are tied to actual stream completion,
-        not just stream setup.
+        Embedding and retrieval errors are raised in the setup phase (before
+        the generator is entered) so they surface as proper DRF error responses
+        via custom_exception_handler, not as mid-stream JSON error chunks.
+        All side effects (QuestionActivity + count increment) are inside the
+        generator so they are tied to actual stream completion.
         """
         question = validated_data["question"]
         doc_id = validated_data.get("document_id")
@@ -270,7 +279,8 @@ class StreamQuestionService:
 
         optimizer = StreamOptimizer()
 
-        # -- Embedding (setup phase — failure raises before generator is entered) --
+        # -- Setup phase: failures raise before the generator is entered -------
+
         try:
             query_vector = optimizer.get_query_embedding(question)
         except Exception as exc:
@@ -279,7 +289,6 @@ class StreamQuestionService:
                 details={"error": str(exc)},
             ) from exc
 
-        # -- Retrieval (setup phase) -------------------------------------------
         try:
             docs = optimizer.retrieve_documents(
                 query_vector=query_vector,
@@ -293,9 +302,9 @@ class StreamQuestionService:
                 details={"error": str(exc)},
             ) from exc
 
-        def _generator():
-            nonlocal docs
+        # -- Generator: all streaming logic and side effects are here ----------
 
+        def _generator():
             # -- No results ----------------------------------------------------
             if not docs:
                 execution_time = int((time.time() - start_time) * 1000)
@@ -309,10 +318,12 @@ class StreamQuestionService:
                     status="no_answer",
                 )
                 IncrementQuestionCountService.execute(user_id=str(user.id))
-                yield json.dumps({
-                    "status": "no_answer",
-                    "answer": "No relevant information found.",
-                }) + "\n"
+                yield json.dumps(
+                    {
+                        "status": "no_answer",
+                        "answer": "No relevant information found.",
+                    }
+                ) + "\n"
                 return
 
             # -- BM25 rerank only (no LLM call — latency is priority) ----------
@@ -321,7 +332,6 @@ class StreamQuestionService:
                 documents=docs,
                 top_k=settings.RERANK_TOP_K,
             )
-
             sources = optimizer.extract_sources(reranked_docs)
             context = "\n\n".join([d.page_content for d in reranked_docs])
             prompt = create_optimized_prompt(context=context, question=question)
@@ -349,10 +359,9 @@ class StreamQuestionService:
                     status="error",
                 )
                 IncrementQuestionCountService.execute(user_id=str(user.id))
-                yield json.dumps({
-                    "error": "Stream interrupted.",
-                    "status": "error",
-                }) + "\n"
+                yield json.dumps(
+                    {"error": "Stream interrupted.", "status": "error"}
+                ) + "\n"
                 return
 
             # -- Post-stream side effects --------------------------------------

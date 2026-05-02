@@ -1,15 +1,22 @@
 from __future__ import annotations
-from typing import TYPE_CHECKING, Any
+
+from typing import Any
+
 from rest_framework import status
 
 
 class QAServiceError(Exception):
     status_code = status.HTTP_400_BAD_REQUEST
 
-    def __init__(self, message: str, status_code: int | None = None, details=None) -> None:
+    def __init__(
+        self,
+        message: str,
+        status_code: int | None = None,
+        details=None,
+    ) -> None:
         super().__init__(message)
         self.message = message
-        self.details: dict[str, Any]= details or {}
+        self.details: dict[str, Any] = details or {}
         if status_code is not None:
             self.status_code = status_code
 

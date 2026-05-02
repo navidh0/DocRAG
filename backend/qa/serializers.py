@@ -75,5 +75,9 @@ class QuestionActivityOutputSerializer(serializers.ModelSerializer):
 
 
 class QuestionActivityStatsSerializer(serializers.Serializer):
-    total_questions = serializers.IntegerField()
+    """
+    Kept for potential future dedicated stats endpoint.
+    Not used by the list view — the paginator builds that envelope directly.
+    """
+
     questions_today = serializers.IntegerField()

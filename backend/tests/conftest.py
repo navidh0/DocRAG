@@ -4,8 +4,6 @@ from rest_framework.test import APIClient
 from django.contrib.auth import get_user_model
 from django.test import override_settings
 
-User = get_user_model()
-
 
 @pytest.fixture
 def api_client_factory():
@@ -38,6 +36,7 @@ def authenticated_client(test_user):  # ← inject test_user instead of creating
 @pytest.fixture
 def test_user():
     """Create a test user."""
+    User = get_user_model()
     return User.objects.create_user(
         username='testuser',
         email='test@example.com',
@@ -48,6 +47,7 @@ def test_user():
 @pytest.fixture
 def second_user():
     """Create a second test user for isolation testing."""
+    User = get_user_model()
     return User.objects.create_user(
         username='otheruser',
         email='other@example.com',
@@ -164,3 +164,13 @@ def django_db_setup(django_db_setup, django_db_blocker):
     """Customize database setup for tests."""
     # Use default SQLite for tests unless overridden
     pass
+
+@pytest.fixture(autouse=True)
+def celery_eager(settings):
+    """
+    Force Celery to run tasks synchronously during tests.
+    Eliminates the need for a live Redis broker.
+    Patches apply correctly because the task runs in the same process.
+    """
+    settings.CELERY_TASK_ALWAYS_EAGER = True
+    settings.CELERY_TASK_EAGER_PROPAGATES = True

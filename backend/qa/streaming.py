@@ -1,4 +1,3 @@
-# qa/streaming.py
 from __future__ import annotations
 
 import hashlib
@@ -67,8 +66,6 @@ class StreamOptimizer:
 
         if self.redis_client:
             try:
-                # Cache for 24 hours — same question asked repeatedly
-                # (common in chat UIs) should not re-embed
                 self.redis_client.setex(
                     cache_key,
                     86400,
@@ -143,19 +140,22 @@ class StreamOptimizer:
         for doc in docs:
             meta = doc.metadata
             excerpt = doc.page_content
-            sources.append({
-                "file_name": meta.get("file_name", "Unknown"),
-                # Page stored 0-based in DB — always surface 1-based to callers
-                "page": meta.get("page", 0) + 1,
-                "chunk_index": meta.get("chunk_index", 0),
-                "excerpt": (excerpt[:200] + "...") if len(excerpt) > 200 else excerpt,
-            })
+            sources.append(
+                {
+                    "file_name": meta.get("file_name", "Unknown"),
+                    # Page stored 0-based in DB — always surface 1-based to callers
+                    "page": meta.get("page", 0) + 1,
+                    "chunk_index": meta.get("chunk_index", 0),
+                    "excerpt": (excerpt[:200] + "...") if len(excerpt) > 200 else excerpt,
+                }
+            )
         return sources
 
 
 # ---------------------------------------------------------------------------
 # Module-level prompt builder — no class state needed
 # ---------------------------------------------------------------------------
+
 
 def create_optimized_prompt(*, context: str, question: str) -> str:
     return (

@@ -24,6 +24,7 @@ class QuestionActivityFilter(django_filters.FilterSet):
 
 def question_activity_list(*, user: User, filters: dict | None = None):
     filters = filters or {}
+
     doc_id = filters.get("document_id")
     if doc_id:
         from documents.models import Document
@@ -50,7 +51,6 @@ def question_activity_get(*, user: "User", activity_id: UUID) -> QuestionActivit
 
 def question_activity_stats(*, user: "User") -> dict:
     return {
-        "total_questions": QuestionActivity.objects.filter(user=user).count(),
         "questions_today": QuestionActivity.objects.filter(
             user=user,
             created_at__date=timezone.now().date(),

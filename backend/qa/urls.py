@@ -9,7 +9,7 @@ from .views import (
 
 urlpatterns = [
     path("ask/", QuestionAnsweringView.as_view(), name="qa-ask"),
-    path("results/<uuid:task_id>/", QuestionResultView.as_view(), name="qa-results"),
+    path("result/<uuid:task_id>/", QuestionResultView.as_view(), name="qa-result"),
     path("stream/", ChatStreamView.as_view(), name="qa-stream"),
     path("history/", QuestionActivityListView.as_view(), name="qa-history"),
     path("activity/", QuestionActivityListView.as_view(), name="qa-activity"),

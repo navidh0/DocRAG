@@ -1,4 +1,5 @@
 from __future__ import annotations
+from typing import cast, Dict, Any
 
 from django.http import StreamingHttpResponse
 from rest_framework import status
@@ -27,9 +28,10 @@ class QuestionAnsweringView(APIView):
     def post(self, request):
         input_serializer = AskQuestionInputSerializer(data=request.data)
         input_serializer.is_valid(raise_exception=True)
+        validated_data = cast(Dict[str, Any], input_serializer.validated_data)
         result = AskQuestionService.execute(
             user=request.user,
-            validated_data=input_serializer.validated_data,
+            validated_data=validated_data,
         )
         return Response(
             AskQuestionOutputSerializer(result).data,
@@ -56,9 +58,10 @@ class ChatStreamView(APIView):
     def post(self, request):
         input_serializer = StreamQuestionInputSerializer(data=request.data)
         input_serializer.is_valid(raise_exception=True)
+        validated_data = cast(Dict[str, Any], input_serializer.validated_data)
         generator = StreamQuestionService.execute(
             user=request.user,
-            validated_data=input_serializer.validated_data,
+            validated_data=validated_data,
         )
         return StreamingHttpResponse(
             generator,

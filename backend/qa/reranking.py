@@ -1,8 +1,10 @@
 
 from __future__ import annotations
+from typing import List
 
 import json
 import logging
+import re
 
 import ollama
 from django.conf import settings
@@ -29,6 +31,33 @@ def _normalize_scores(scores: list[float]) -> list[float]:
     if hi == lo:
         return [1.0 / len(scores)] * len(scores)
     return [(s - lo) / (hi - lo) for s in scores]
+
+def _parse_llm_scores(raw: str, expected_count: int) -> list[float]:
+    """
+    Robustly extracts a scores list from an LLM response that may:
+    - be wrapped in ```json ... ``` fences
+    - have leading/trailing whitespace or preamble text
+    - be empty (returns zeros so callers can degrade gracefully)
+    """
+    if not raw or not raw.strip():
+        raise ValueError("LLM returned an empty response")
+
+    # Strip markdown fences if present
+    cleaned = re.sub(r"```(?:json)?", "", raw).strip()
+
+    # If there's preamble text, try to find the JSON object inside
+    match = re.search(r"\{.*\}", cleaned, re.DOTALL)
+    if match:
+        cleaned = match.group(0)
+
+    data = json.loads(cleaned)  # raises JSONDecodeError if still unparseable
+    scores = data.get("scores", [])
+
+    # Pad or trim to match document count
+    if len(scores) < expected_count:
+        scores += [0] * (expected_count - len(scores))
+    scores = [float(s) for s in scores[:expected_count]]
+    return scores
 
 
 # ---------------------------------------------------------------------------
@@ -90,6 +119,7 @@ class LLMReranker:
             response = self.client.generate(
                 model=self.model,
                 prompt=scoring_prompt,
+                format="json",   # fix: forces Ollama to return valid JSON
                 stream=False,
             )
         except Exception as exc:
@@ -99,13 +129,12 @@ class LLMReranker:
             ) from exc
 
         try:
-            raw = response["response"].strip()
-            scores_data = json.loads(raw)
-            scores = scores_data.get("scores", [])
-        except (json.JSONDecodeError, KeyError) as exc:
+            raw = response["response"]
+            scores = _parse_llm_scores(raw, len(documents))  # fix: robust parser
+        except Exception as exc:
             logger.warning(
-                "[LLMReranker] Could not parse scores JSON, "
-                "falling back to original order. Raw: %r. Error: %s",
+                "[LLMReranker] Could not parse scores, falling back to original order. "
+                "Raw: %r. Error: %s",
                 response.get("response", ""),
                 exc,
             )
@@ -113,7 +142,7 @@ class LLMReranker:
 
         ranked = sorted(
             enumerate(documents),
-            key=lambda pair: scores[pair[0]] if pair[0] < len(scores) else 0,
+            key=lambda pair: scores[pair[0]],
             reverse=True,
         )
         return [doc for _, doc in ranked[:top_k]]
@@ -177,17 +206,13 @@ class HybridReranker:
             response = self.llm.client.generate(
                 model=self.llm.model,
                 prompt=llm_prompt,
+                format="json",   # fix: forces Ollama to return valid JSON
                 stream=False,
             )
-            raw_text = response["response"].strip()
-            llm_scores_data = json.loads(raw_text)
-            raw_llm = llm_scores_data.get("scores", [])
-            # Pad or trim to match document count
-            if len(raw_llm) < len(documents):
-                raw_llm += [0] * (len(documents) - len(raw_llm))
-            raw_llm = [float(s) for s in raw_llm[: len(documents)]]
+            raw_text = response["response"]
+            raw_llm = _parse_llm_scores(raw_text, len(documents))  # fix: robust parser
         except RerankingError:
-            raise  # Ollama is down — propagate so service can handle it
+            raise
         except Exception as exc:
             logger.warning(
                 "[HybridReranker] LLM scoring failed, using BM25 only. Error: %s", exc

@@ -9,13 +9,12 @@ layer to avoid depending on external services (Ollama, PGVector, etc.).
 import json
 import uuid
 from contextlib import contextmanager
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
-from django.urls import reverse
 from rest_framework import status
-from rest_framework.test import APIClient
 
+from documents.models import Document
 from qa.models import QuestionActivity
 
 
@@ -26,7 +25,6 @@ from qa.models import QuestionActivity
 @pytest.fixture
 def document(db, test_user):
     """Create a processed document owned by test_user."""
-    from documents.models import Document
     return Document.objects.create(
         user=test_user,
         file_name="test.pdf",
@@ -47,7 +45,7 @@ FAKE_SOURCES = [
     }
 ]
 
-MOCK_TASK_ID = "550e8400-e29b-41d4-a716-446655440000"
+MOCK_TASK_ID = str(uuid.UUID("550e8400-e29b-41d4-a716-446655440000"))
 
 FAKE_ASK_RESULT = {
     "task_id": MOCK_TASK_ID,

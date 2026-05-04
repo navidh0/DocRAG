@@ -1,7 +1,9 @@
 import environ
 import os
+import logging
 from pathlib import Path
 from datetime import timedelta
+
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -149,6 +151,35 @@ SPECTACULAR_SETTINGS = {
     'SWAGGER_UI_DIST': 'SIDECAR',  
     'SWAGGER_UI_FAVICON_HREF': 'SIDECAR',
     'REDOC_DIST': 'SIDECAR',
+}
+
+
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+
+    "formatters": {
+        "verbose": {
+            "format": "[{asctime}] {levelname} {name} — {message}",
+            "style": "{",
+        },
+    },
+
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "verbose",
+        },
+    },
+
+    "loggers": {
+        "documents": {
+            "handlers": ["console"],
+            "level": "DEBUG",       
+            "propagate": False,
+        },
+    },
 }
 # Celery
 CELERY_BROKER_URL = env("REDIS_URL", default="redis://redis:6379/0")

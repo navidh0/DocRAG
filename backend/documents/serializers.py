@@ -62,9 +62,8 @@ class DocumentListFilterSerializer(serializers.Serializer):
 class DocumentOutputSerializer(serializers.ModelSerializer):
     class Meta:
         model = Document
-        fields = ('id', 'file', 'file_name', 'file_type', 'status', 'created_at')
+        fields = ('id', 'file_name', 'file_type', 'status')
         read_only_fields = fields
-
 
 class DocumentStatusOutputSerializer(serializers.Serializer):
     id = serializers.UUIDField()

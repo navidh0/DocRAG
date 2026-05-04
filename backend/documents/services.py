@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from typing import TYPE_CHECKING, cast, Any
 from uuid import UUID
@@ -137,7 +138,7 @@ class DebugDocumentChunksService:
             "chunks": [
                 {
                     "content": (row[1] or "")[:150],
-                    "metadata": row[0],
+                    "metadata": row[0] if isinstance(row[0], dict) else json.loads(row[0]),
                 }
                 for row in rows
             ],

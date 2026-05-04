@@ -205,7 +205,7 @@ class TestDocumentRetrieveDestroy:
         doc = make_document(user=test_user)
         response = authenticated_client.get(f"/api/documents/{doc.id}/")
 
-        assert set(response.data.keys()) == {"id", "file", "file_name", "file_type", "status", "created_at"}
+        assert set(response.data.keys()) == {"id", "file_name", "file_type", 'status'}
 
     def test_retrieve_other_users_document_returns_404(self, authenticated_client, second_user, make_document):
         doc = make_document(user=second_user)

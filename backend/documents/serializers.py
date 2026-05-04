@@ -25,11 +25,14 @@ class DocumentUploadInputSerializer(serializers.Serializer):
                 "file": f"Unsupported file type: .{ext}. Allowed: {sorted(ALLOWED_EXTENSIONS)}"
             })
 
+        if file.size == 0:
+            raise serializers.ValidationError({
+                "file": "Uploaded file is empty."
+            })
+
         attrs['file_name'] = file.name
         attrs['file_type'] = ext
         return attrs
-
-
 class DocumentListFilterSerializer(serializers.Serializer):
     """
     Validates and coerces query parameters for document list filtering.

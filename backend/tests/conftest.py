@@ -150,6 +150,16 @@ def mock_ollama_client(monkeypatch):
     monkeypatch.setattr('ollama.Client', mock_client)
     return MockOllamaClient()
 
+@pytest.fixture(autouse=True)
+def mock_embedding_task(mocker):
+    """
+    Patches Celery task dispatch globally across all tests.
+    Prevents any test from accidentally hitting a real broker.
+    Use `mock_embedding_task.assert_called_once_with(str(doc_id))`
+    in upload tests to verify scheduling without executing.
+    """
+    return mocker.patch("documents.tasks.process_document_embedding.delay")
+
 
 @pytest.fixture(autouse=True)
 def reset_db():
@@ -164,3 +174,24 @@ def django_db_setup(django_db_setup, django_db_blocker):
     """Customize database setup for tests."""
     # Use default SQLite for tests unless overridden
     pass
+
+@pytest.fixture
+def make_document(test_user):
+    """
+    Factory fixture for creating Document records directly in the DB,
+    bypassing the upload API. Use this in tests that care about
+    list/detail/delete/status behaviour, not upload behaviour.
+    """
+    def _make(file_name="test.pdf", file_type="pdf", status="pending", user=None, created_at=None):
+        from documents.models import Document
+        doc = Document.objects.create(
+            user=user or test_user,
+            file_name=file_name,
+            file_type=file_type,
+            status=status,
+        )
+        if created_at is not None:
+            Document.objects.filter(id=doc.id).update(created_at=created_at)
+            doc.refresh_from_db()
+        return doc
+    return _make

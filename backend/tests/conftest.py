@@ -1,9 +1,11 @@
 """Pytest configuration and shared fixtures for RAG system tests."""
 import pytest
+import environ
+from pathlib import Path
 from rest_framework.test import APIClient
 from django.contrib.auth import get_user_model
-from django.test import override_settings
 
+environ.Env.read_env(Path(__file__).resolve().parent.parent / ".env.test")
 User = get_user_model()
 
 

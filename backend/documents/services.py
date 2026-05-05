@@ -17,8 +17,8 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document as LCDocument
 from langchain_core.embeddings import Embeddings
 
+from core.utils import get_vector_store_connection
 from .models import Document
-from .utils import get_vector_store_connection
 from .exceptions import DocumentNotFoundError, DocumentProcessingError
 
 if TYPE_CHECKING:

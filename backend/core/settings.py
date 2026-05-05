@@ -1,6 +1,5 @@
 import environ
 import os
-import logging
 from pathlib import Path
 from datetime import timedelta
 
@@ -77,11 +76,9 @@ TEMPLATES = [
 WSGI_APPLICATION = "core.wsgi.application"
 
 # Database
+DATABASE_URL = env("DATABASE_URL", default="postgresql://raguser:ragpassword@localhost:5432/ragdb")
 DATABASES = {
-    "default": env.db(
-        "DATABASE_URL",
-        default="postgresql://raguser:ragpassword@localhost:5432/ragdb",
-    )
+    "default": env.db("DATABASE_URL", default="postgresql://raguser:ragpassword@localhost:5432/ragdb")
 }
 
 # Custom user model
@@ -182,8 +179,8 @@ LOGGING = {
     },
 }
 # Celery
-CELERY_BROKER_URL = env("REDIS_URL", default="redis://redis:6379/0")
-CELERY_RESULT_BACKEND = env("REDIS_URL", default="redis://redis:6379/0")
+CELERY_BROKER_URL = env("REDIS_URL", default="redis://localhost:6379/0")
+CELERY_RESULT_BACKEND = env("REDIS_URL", default="redis://localhost:6379/0")
 CELERY_TASK_ROUTES = {
     "documents.tasks.*": {"queue": "documents"},
     "qa.tasks.*": {"queue": "qa"},

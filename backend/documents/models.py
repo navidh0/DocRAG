@@ -3,7 +3,7 @@ from django.db import models
 from django.conf import settings
 
 def user_directory_path(instance, filename):
-    # Files will be uploaded to MEDIA_ROOT/uploads/user_<id>/<filename>
+
     return f'uploads/user_{instance.user.id}/{filename}'
 
 class Document(models.Model):

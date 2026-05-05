@@ -28,6 +28,7 @@ ENV/
 
 # ── Environment / secrets ──────────────────────────────────────────────────────
 .env
+.env.test
 .env.local
 .env.*.local
 *.pem

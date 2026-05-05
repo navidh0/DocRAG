@@ -1,8 +1,15 @@
 from django.urls import path
-from .views import QuestionAnsweringView, ChatStreamView, QuestionActivityListView
+
+from .views import (
+    ChatStreamView,
+    QuestionAnsweringView,
+    QuestionActivityListView,
+    QuestionResultView,
+)
 
 urlpatterns = [
-    path('ask/', QuestionAnsweringView.as_view(), name='question-answering'),
-    path('stream/', ChatStreamView.as_view(), name='chat-stream'),
-    path('activity/', QuestionActivityListView.as_view(), name='question-activity'),
+    path("ask/", QuestionAnsweringView.as_view(), name="qa-ask"),
+    path("result/<uuid:task_id>/", QuestionResultView.as_view(), name="qa-result"),
+    path("stream/", ChatStreamView.as_view(), name="qa-stream"),
+    path("history/", QuestionActivityListView.as_view(), name="qa-history"),
 ]

@@ -22,7 +22,7 @@ langchain-core>=0.3.0,<0.4.0
 langchain-community>=0.3.0,<0.4.0
 langchain-text-splitters>=0.3.0,<0.4.0
 langchain-postgres==0.0.12
-
+rank_bm25==0.2.2
 # --- File Parsing ---
 # Removed extras to keep the dependency tree shallow
 unstructured==0.16.25

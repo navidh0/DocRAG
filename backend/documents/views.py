@@ -31,7 +31,7 @@ from .services import (
     CreateDocumentService,
     GetDocumentStatusService,
     DeleteDocumentService,
-    DebugDocumentChunksService,
+    DocumentChunksService,
 )
 from .selectors import document_list, document_get
 
@@ -226,7 +226,7 @@ class DocumentStatusView(APIView):
         )
 
         if include_chunks:
-            chunks_data = DebugDocumentChunksService.execute(
+            chunks_data = DocumentChunksService.execute(
                 user=request.user,
                 document_id=id,
             )

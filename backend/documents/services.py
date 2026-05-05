@@ -101,10 +101,10 @@ class GetDocumentStatusService:
 
 
 # =========================
-# DEBUG CHUNKS
+# DOCUMENT CHUNKS
 # =========================
 
-class DebugDocumentChunksService:
+class DocumentChunksService:
     @staticmethod
     def execute(*, user: User, document_id: UUID) -> dict[str, Any]:
         sql = """
@@ -130,7 +130,7 @@ class DebugDocumentChunksService:
             )
             rows = []
 
-        logger.debug("Chunks fetched: id=%s total=%d user=%s", document_id, len(rows), user.id)
+        logger.info("Chunks fetched: id=%s total=%d user=%s", document_id, len(rows), user.id)
 
         return {
             "document_id": str(document_id),
@@ -186,7 +186,8 @@ class ProcessDocumentService:
                 document_id, exc.message,
             )
             doc.status = "failed"
-
+            raise
+        
         except Exception:
             logger.error(
                 "Processing failed — unexpected error: id=%s",
@@ -194,7 +195,8 @@ class ProcessDocumentService:
                 exc_info=True,
             )
             doc.status = "failed"
-
+            raise
+        
         finally:
             doc.save()
 
@@ -210,11 +212,11 @@ class ProcessDocumentService:
             loader = PyMuPDFLoader(doc.file.path)
             return loader.load()
 
-        if file_name.endswith((".xlsx", ".xls")):
+        elif file_name.endswith((".xlsx", ".xls")):
             loader = UnstructuredExcelLoader(doc.file.path, mode="elements")
             return loader.load()
 
-        if file_name.endswith((".txt", ".csv")):
+        elif file_name.endswith((".txt", ".csv")):
             with open(doc.file.path, "r", encoding="utf-8") as f:
                 text = f.read()
             return [LCDocument(page_content=text, metadata={"source": doc.file_name})]

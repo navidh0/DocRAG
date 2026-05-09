@@ -254,12 +254,13 @@ class ProcessDocumentService:
         )
 
         metadatas: list[dict[str, Any]] = []
-        for split in splits:
+        for i, split in enumerate(splits):
             meta = dict(split.metadata)
             meta.update({
                 "user_id": str(doc.user.id),
                 "document_id": str(doc.id),
                 "file_name": doc.file_name,
+                "chunk_index": i,
             })
             metadatas.append(meta)
 

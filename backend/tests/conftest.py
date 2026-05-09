@@ -197,3 +197,13 @@ def make_document(test_user):
             doc.refresh_from_db()
         return doc
     return _make
+
+@pytest.fixture(autouse=True)
+def celery_eager(settings):
+    """
+    Force Celery to run tasks synchronously during tests.
+    Eliminates the need for a live Redis broker.
+    Patches apply correctly because the task runs in the same process.
+    """
+    settings.CELERY_TASK_ALWAYS_EAGER = True
+    settings.CELERY_TASK_EAGER_PROPAGATES = True

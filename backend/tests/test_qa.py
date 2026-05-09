@@ -137,7 +137,7 @@ class TestQuestionAnswering:
             response_time_ms=250,
             status="success",
         )
-        res = authenticated_client.get("/api/qa/history/")
+        res = authenticated_client.get("/api/qa/activity/")
         assert res.status_code == status.HTTP_200_OK
         assert res.data["total_questions"] >= 1
 
@@ -279,19 +279,19 @@ class TestQuestionHistory:
 
     def test_list_question_history(self, authenticated_client, test_user, document):
         self._make_activity(test_user, document)
-        res = authenticated_client.get("/api/qa/history/")
+        res = authenticated_client.get("/api/qa/activity/")
         assert res.status_code == status.HTTP_200_OK
         assert res.data["total_questions"] >= 1
         assert "total_questions" in res.data
         assert "questions_today" in res.data
 
     def test_history_requires_auth(self, api_client):
-        res = api_client.get("/api/qa/history/")
+        res = api_client.get("/api/qa/activity/")
         assert res.status_code == status.HTTP_401_UNAUTHORIZED
 
     def test_user_cannot_see_other_users_history(self, authenticated_client, second_user):
         self._make_activity(second_user)
-        res = authenticated_client.get("/api/qa/history/")
+        res = authenticated_client.get("/api/qa/activity/")
         assert res.status_code == status.HTTP_200_OK
         assert res.data["total_questions"] == 0
 
@@ -304,7 +304,7 @@ class TestQuestionHistory:
             response_time_ms=333,
             status="success",
         )
-        res = authenticated_client.get("/api/qa/history/")
+        res = authenticated_client.get("/api/qa/activity/")
         assert res.status_code == status.HTTP_200_OK
         activity = res.data["activities"][0]
         assert activity["question"] == "Specific question?"
@@ -373,7 +373,7 @@ class TestPerformanceTracking:
             response_time_ms=150,
             status="success",
         )
-        res = authenticated_client.get("/api/qa/history/")
+        res = authenticated_client.get("/api/qa/activity/")
         assert res.status_code == status.HTTP_200_OK
         activity = res.data["activities"][0]
         assert activity["sources_count"] == len(FAKE_SOURCES)

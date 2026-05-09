@@ -1,30 +1,37 @@
 from __future__ import annotations
-from typing import TYPE_CHECKING
+
+from typing import TYPE_CHECKING, Any, TypedDict, cast
 from uuid import UUID
 
-import django_filters
 from django.utils import timezone
 
 from .exceptions import QuestionActivityNotFoundError
+from .filters import QuestionActivityFilter
 from .models import QuestionActivity
 
 if TYPE_CHECKING:
     from accounts.models import User
 
 
-class QuestionActivityFilter(django_filters.FilterSet):
-    class Meta:
-        model = QuestionActivity
-        fields = {
-            "status": ["exact"],
-            "document_id": ["exact"],
-        }
+class QuestionActivityListFilters(TypedDict, total=False):
+    """
+    Typed contract between the filter serializer and the selector.
+    Each key maps 1-to-1 to a field on QuestionActivityFilter.
+    Extend here (and in filters.py + serializers.py) as new filters are added.
+    """
+
+    status: str
+    document_id: UUID
 
 
-def question_activity_list(*, user: User, filters: dict | None = None):
-    filters = filters or {}
+def question_activity_list(
+    *,
+    user: User,
+    filters: QuestionActivityListFilters | None = None,
+):
+    raw: dict[str, Any] = cast(dict[str, Any], filters) if filters else {}
 
-    doc_id = filters.get("document_id")
+    doc_id = raw.get("document_id")
     if doc_id:
         from documents.models import Document
 
@@ -35,10 +42,10 @@ def question_activity_list(*, user: User, filters: dict | None = None):
             )
 
     qs = QuestionActivity.objects.filter(user=user).order_by("-created_at")
-    return QuestionActivityFilter(filters, queryset=qs).qs
+    return QuestionActivityFilter(raw, queryset=qs).qs
 
 
-def question_activity_get(*, user: "User", activity_id: UUID) -> QuestionActivity:
+def question_activity_get(*, user: User, activity_id: UUID) -> QuestionActivity:
     try:
         return QuestionActivity.objects.get(id=activity_id, user=user)
     except QuestionActivity.DoesNotExist:
@@ -48,7 +55,7 @@ def question_activity_get(*, user: "User", activity_id: UUID) -> QuestionActivit
         )
 
 
-def question_activity_stats(*, user: "User") -> dict:
+def question_activity_stats(*, user: User) -> dict:
     return {
         "questions_today": QuestionActivity.objects.filter(
             user=user,

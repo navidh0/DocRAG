@@ -1,12 +1,22 @@
-# qa/serializers.py
+from __future__ import annotations
+
 from rest_framework import serializers
 
 from .models import QuestionActivity
+
+# ---------------------------------------------------------------------------
+# Module-level constants
+# Derived from the model so there is exactly one source of truth.
+# ---------------------------------------------------------------------------
+
+STATUS_CHOICES = [choice[0] for choice in QuestionActivity.STATUS_CHOICES]
+# → ['success', 'no_answer', 'error']
 
 
 # ---------------------------------------------------------------------------
 # Input Serializers — validation only, no representation logic
 # ---------------------------------------------------------------------------
+
 
 class AskQuestionInputSerializer(serializers.Serializer):
     question = serializers.CharField(required=True)
@@ -29,9 +39,32 @@ class StreamQuestionInputSerializer(serializers.Serializer):
         return value
 
 
+class QuestionActivityListFilterSerializer(serializers.Serializer):
+    """
+    Validates and coerces query parameters for the activity list endpoint.
+    Validated data is passed directly to QuestionActivityFilter in the selector.
+    Mirrors DocumentListFilterSerializer in the documents app.
+    """
+
+    status = serializers.ChoiceField(
+        choices=STATUS_CHOICES,
+        required=False,
+        help_text="Filter by question outcome.",
+    )
+    document_id = serializers.UUIDField(
+        required=False,
+        allow_null=True,
+        help_text=(
+            "Scope history to a specific document. "
+            "Returns 404 if the document does not belong to the authenticated user."
+        ),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Output Serializers — representation only, no validation logic
 # ---------------------------------------------------------------------------
+
 
 class AskQuestionOutputSerializer(serializers.Serializer):
     task_id = serializers.CharField()

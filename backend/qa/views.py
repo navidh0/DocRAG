@@ -102,7 +102,6 @@ class QuestionAnsweringView(APIView):
             status=status.HTTP_202_ACCEPTED,
         )
 
-
 class QuestionResultView(APIView):
     permission_classes = [IsAuthenticated]
 

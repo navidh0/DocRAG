@@ -10,10 +10,10 @@ def custom_exception_handler(exc, context):
             {"error": exc.message, "details": exc.details},
             status=exc.status_code,
         )
-        if isinstance(exc, QAServiceError):
-            return Response(
-                {"error": exc.message, "details": exc.details},
-                status=exc.status_code,
-            )
+    if isinstance(exc, QAServiceError):
+        return Response(
+            {"error": exc.message, "details": exc.details},
+            status=exc.status_code,
+        )
 
     return exception_handler(exc, context)

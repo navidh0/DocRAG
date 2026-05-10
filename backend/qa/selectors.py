@@ -18,8 +18,8 @@ class QuestionActivityListFilters(TypedDict, total=False):
     Typed contract between the filter serializer and the selector.
     Each key maps 1-to-1 to a field on QuestionActivityFilter.
     Extend here (and in filters.py + serializers.py) as new filters are added.
+    The implemention is similar to the document domain.
     """
-
     status: str
     document_id: UUID
 

@@ -9,6 +9,8 @@ import ollama
 from django.conf import settings
 from django.db.models import F
 from langchain_postgres import PGVector
+from celery.result import AsyncResult
+from django.contrib.auth import get_user_model
 
 from documents.utils import get_vector_store_connection
 
@@ -28,11 +30,9 @@ logger = logging.getLogger(__name__)
 # Internal utility service
 # ---------------------------------------------------------------------------
 
-
 class IncrementQuestionCountService:
     @staticmethod
     def execute(*, user_id: str) -> None:
-        from django.contrib.auth import get_user_model
 
         get_user_model().objects.filter(id=user_id).update(
             question_count=F("question_count") + 1
@@ -42,7 +42,6 @@ class IncrementQuestionCountService:
 # ---------------------------------------------------------------------------
 # ProcessQuestionService — full RAG pipeline, called by Celery task
 # ---------------------------------------------------------------------------
-
 
 class ProcessQuestionService:
     @staticmethod
@@ -213,10 +212,10 @@ class ProcessQuestionService:
 class AskQuestionService:
     @staticmethod
     def execute(*, user, validated_data: dict) -> dict:
-        from .tasks import process_question_task
+        from .tasks import process_question_task #django circular import => tasks calls the method
 
         doc_id = validated_data.get("document_id")
-        celery_task: Any = process_question_task  # Celery decorates .delay() at runtime
+        celery_task: Any = process_question_task  # Celery decorates .delay() at runtime => pylance issue
         task = celery_task.delay(
             question=validated_data["question"],
             user_id=str(user.id),
@@ -234,7 +233,6 @@ class AskQuestionService:
 class GetQuestionResultService:
     @staticmethod
     def execute(*, task_id: str) -> dict:
-        from celery.result import AsyncResult
 
         result = AsyncResult(task_id)
 

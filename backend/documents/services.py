@@ -36,8 +36,7 @@ class CreateDocumentService:
     def execute(*, user: User, validated_data: dict[str, Any]) -> Document:
         doc = Document.objects.create(user=user, **validated_data)
         logger.info("Document created: id=%s file_name=%s user=%s", doc.id, doc.file_name, user.id)
-
-        from .tasks import process_document_embedding
+        from .tasks import process_document_embedding #django circular import
 
         transaction.on_commit(
             lambda: process_document_embedding.delay(str(doc.id))  # type: ignore

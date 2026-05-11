@@ -8,7 +8,7 @@ from django.conf import settings
 from qa.exceptions import (
     DocumentRetrievalError,
     EmbeddingGenerationError,
-    QAServiceError,
+    OllamaUnavailableError,
 )
 from qa.models import QuestionActivity
 from .activity import IncrementQuestionCountService
@@ -128,9 +128,8 @@ class ProcessQuestionService:
                 response_time_ms=execution_time,
                 status="error",
             )
-            raise QAServiceError(
-                "Failed to generate answer.",
-                status_code=503,
+            raise OllamaUnavailableError(
+                "Ollama service is unreachable during answer generation.",
                 details={"error": str(exc)},
             ) from exc
 

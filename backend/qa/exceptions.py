@@ -35,3 +35,6 @@ class RerankingError(QAServiceError):
 
 class QuestionActivityNotFoundError(QAServiceError):
     status_code: int = status.HTTP_404_NOT_FOUND
+    
+class OllamaUnavailableError(QAServiceError):
+    status_code: int = status.HTTP_503_SERVICE_UNAVAILABLE

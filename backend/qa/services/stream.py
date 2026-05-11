@@ -15,7 +15,12 @@ from .activity import IncrementQuestionCountService
 from .embedding import get_query_embedding
 from .retrieval import retrieve_documents
 from .reranking import BM25Reranker
-from .streaming import create_optimized_prompt, extract_sources, stream_response_buffered
+from .streaming import (
+    create_optimized_prompt, 
+    extract_sources, 
+    stream_response_buffered,
+    check_ollama_connection,
+)
 
 if TYPE_CHECKING:
     from accounts.models import User
@@ -48,6 +53,8 @@ class StreamQuestionService:
             )
 
         # -- Setup phase -------------------------------------------------------
+        check_ollama_connection()
+        
         try:
             query_vector = get_query_embedding(question)
         except Exception as exc:

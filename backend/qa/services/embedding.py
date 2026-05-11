@@ -7,6 +7,7 @@ import logging
 import ollama
 import redis
 from django.conf import settings
+from qa.exceptions import OllamaUnavailableError
 
 logger = logging.getLogger(__name__)
 
@@ -43,11 +44,17 @@ def get_query_embedding(question: str) -> list[float]:
         except Exception as exc:
             logger.warning("[embedding] Redis read failed: %s", exc)
 
-    client = ollama.Client(host=settings.OLLAMA_BASE_URL)
-    embedding = client.embed(
-        model=settings.OLLAMA_EMBED_MODEL,
-        input=question,
-    )["embeddings"][0]
+    try:
+        client = ollama.Client(host=settings.OLLAMA_BASE_URL)
+        embedding = client.embed(
+            model=settings.OLLAMA_EMBED_MODEL,
+            input=question,
+        )["embeddings"][0]
+    except Exception as exc:
+        raise OllamaUnavailableError(
+            "Ollama service is unreachable. Ensure Ollama is running.",
+            details={"error": str(exc)},
+        ) from exc
 
     if redis_client:
         try:

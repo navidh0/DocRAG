@@ -5,6 +5,7 @@ import logging
 
 import ollama
 from django.conf import settings
+from qa.exceptions import OllamaUnavailableError
 
 logger = logging.getLogger(__name__)
 
@@ -62,3 +63,17 @@ def create_optimized_prompt(*, context: str, question: str) -> str:
         "- If the context doesn't contain relevant information, say so\n\n"
         "Answer:"
     )
+    
+def check_ollama_connection() -> None:
+    """
+    Lightweight preflight check — raises if Ollama is unreachable.
+    Call this in the setup phase of any streaming service so the error
+    surfaces as a proper HTTP response before headers are committed.
+    """
+    try:
+        ollama.Client(host=settings.OLLAMA_BASE_URL).list()
+    except Exception as exc:
+        raise OllamaUnavailableError(
+            "Ollama service is unreachable. Ensure Ollama is running.",
+            details={"error": str(exc)},
+        ) from exc

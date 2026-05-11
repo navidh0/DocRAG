@@ -8,7 +8,7 @@ import ollama
 from django.conf import settings
 from rank_bm25 import BM25Okapi
 
-from qa.exceptions import RerankingError
+from qa.exceptions import RerankingError, OllamaUnavailableError
 
 logger = logging.getLogger(__name__)
 
@@ -136,11 +136,11 @@ class LLMReranker:
                 stream=False,
             )
         except Exception as exc:
-            raise RerankingError(
-                "LLM reranker could not reach Ollama.",
+            raise OllamaUnavailableError(  # connection failure — hard stop
+                "Ollama service is unreachable during reranking.",
                 details={"error": str(exc)},
             ) from exc
-
+            
         try:
             return _parse_llm_scores(response["response"], len(documents))
         except Exception as exc:

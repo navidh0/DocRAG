@@ -497,7 +497,7 @@ class QuestionActivityListView(APIView):
 
         paginator = QuestionActivityPagination()
         paginated_qs = paginator.paginate_queryset(activities, request, view=self)
-        paginator._questions_today = stats["questions_today"]
+        paginator.set_questions_today(stats["questions_today"])
 
         output = QuestionActivityOutputSerializer(paginated_qs, many=True)
         response = paginator.get_paginated_response(output.data)

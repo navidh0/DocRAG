@@ -1,13 +1,15 @@
 from __future__ import annotations
+
 from typing import Any
 
 from rest_framework import status
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 
+
 class QuestionActivityPagination(PageNumberPagination):
     """
-    Custom paginator for GET /api/qa/history/.
+    Custom paginator for GET /api/qa/activity/.
 
     Produces the envelope:
         {
@@ -18,18 +20,22 @@ class QuestionActivityPagination(PageNumberPagination):
             "total_pages":     <total page count>,
             "activities":      [...]
         }
-
-    page_size_query_param enables ?page_size=N overrides per request.
     """
 
     page_size_query_param = "page_size"
-    _questions_today: int = 0
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._questions_today: int = 0  # instance attribute — not shared across requests
+
+    def set_questions_today(self, value: int) -> None:
+        self._questions_today = value
 
     def get_paginated_response(self, data: Any) -> Response:
         return Response(
             {
                 "total_questions": self.page.paginator.count,
-                "questions_today": getattr(self, "_questions_today", 0),
+                "questions_today": self._questions_today,
                 "page": self.page.number,
                 "page_size": self.get_page_size(self.request),
                 "total_pages": self.page.paginator.num_pages,

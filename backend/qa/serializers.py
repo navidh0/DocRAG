@@ -20,7 +20,7 @@ STATUS_CHOICES = [choice[0] for choice in QuestionActivity.STATUS_CHOICES]
 
 class AskQuestionInputSerializer(serializers.Serializer):
     question = serializers.CharField(required=True)
-    document_id = serializers.UUIDField(required=False, allow_null=True)
+    document_id = serializers.UUIDField(required=False, allow_null=False)
     page = serializers.IntegerField(required=False, allow_null=True, min_value=1)
 
     def validate_question(self, value: str) -> str:
@@ -31,7 +31,7 @@ class AskQuestionInputSerializer(serializers.Serializer):
 
 class StreamQuestionInputSerializer(serializers.Serializer):
     question = serializers.CharField(required=True)
-    document_id = serializers.UUIDField(required=False, allow_null=True)
+    document_id = serializers.UUIDField(required=False, allow_null=False)
 
     def validate_question(self, value: str) -> str:
         if not value.strip():

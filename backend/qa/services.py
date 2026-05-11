@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 import json
 import logging
@@ -12,16 +12,26 @@ from langchain_postgres import PGVector
 from celery.result import AsyncResult
 from django.contrib.auth import get_user_model
 
-from documents.utils import get_vector_store_connection
+from  core.utils import get_vector_store_connection
+from documents.models import Document 
+from documents.exceptions import DocumentNotFoundError
 
 from .exceptions import (
     DocumentRetrievalError,
     EmbeddingGenerationError,
     QAServiceError,
+    QuestionActivityNotFoundError
+)
+from .selectors import (                 
+    question_activity_list,
+    QuestionActivityListFilters,
 )
 from .models import QuestionActivity
 from .reranking import BM25Reranker, HybridReranker
 from .streaming import StreamOptimizer, create_optimized_prompt
+
+if TYPE_CHECKING:
+    from accounts.models import User
 
 logger = logging.getLogger(__name__)
 
@@ -74,21 +84,41 @@ class ProcessQuestionService:
             store = PGVector(
                 collection_name="rag_collection",
                 connection=connection,
-                embeddings=None,   # type: ignore[arg-type]
+                embeddings=None,  # type: ignore[arg-type]
                 use_jsonb=True,
             )
-            search_filter: dict = {"user_id": str(user_id)}
-            if doc_id:
-                search_filter["document_id"] = str(doc_id)
-            if page_filter is not None:
-                # API accepts 1-based; DB stores 0-based
-                search_filter["page"] = int(page_filter) - 1
 
-            docs = store.similarity_search_by_vector(
-                embedding=query_vector,
-                k=settings.TOP_K_CHUNKS,
-                filter=search_filter,
-            )
+            if doc_id:
+                # Scoped query — single document, original behaviour preserved
+                search_filter: dict = {"user_id": str(user_id)}
+                search_filter["document_id"] = str(doc_id)
+                if page_filter is not None:
+                    # API accepts 1-based; DB stores 0-based
+                    search_filter["page"] = int(page_filter) - 1
+
+                docs = store.similarity_search_by_vector(
+                    embedding=query_vector,
+                    k=settings.TOP_K_CHUNKS,
+                    filter=search_filter,
+                )
+            else:
+                # Global query — fetch per document to guarantee representation
+                user_doc_ids = list(
+                    Document.objects.filter(user_id=user_id, status="completed")
+                    .values_list("id", flat=True)
+                )
+                docs = []
+                for d_id in user_doc_ids:
+                    per_doc_chunks = store.similarity_search_by_vector(
+                        embedding=query_vector,
+                        k=settings.TOP_K_CHUNKS_PER_DOC,
+                        filter={
+                            "user_id": str(user_id),
+                            "document_id": str(d_id),
+                        },
+                    )
+                    docs.extend(per_doc_chunks)
+
         except Exception as exc:
             raise DocumentRetrievalError(
                 "Failed to retrieve documents from vector store.",
@@ -117,16 +147,19 @@ class ProcessQuestionService:
             }
 
         # -- Step 4: Hybrid rerank ---------------------------------------------
+        doc_count = len({d.metadata.get("document_id") for d in docs})
+        top_k = min(doc_count * settings.RERANK_TOP_K_PER_DOC, settings.RERANK_TOP_K_MAX)
+
         try:
-            reranked_docs = HybridReranker().rerank(question=question, documents=docs)
+            reranked_docs = HybridReranker(top_k=top_k).rerank(question=question, documents=docs)
         except Exception as exc:
             logger.warning(
                 "[ProcessQuestionService] Reranking failed, falling back to top-%d. "
                 "Error: %s",
-                settings.RERANK_TOP_K,
+                top_k,
                 exc,
             )
-            reranked_docs = docs[: settings.RERANK_TOP_K]
+            reranked_docs = docs[:top_k]
 
         # -- Step 5: Build prompt ----------------------------------------------
         context_parts = []
@@ -215,6 +248,14 @@ class AskQuestionService:
         from .tasks import process_question_task #django circular import => tasks calls the method
 
         doc_id = validated_data.get("document_id")
+        
+        if doc_id is not None:
+            if not Document.objects.filter(id=doc_id, user=user).exists():
+                raise DocumentNotFoundError(
+                    "Document not found or does not belong to you.",
+                    details={"document_id": str(doc_id)},
+                )
+
         celery_task: Any = process_question_task  # Celery decorates .delay() at runtime => pylance issue
         task = celery_task.delay(
             question=validated_data["question"],
@@ -278,6 +319,13 @@ class StreamQuestionService:
         start_time = time.time()
 
         optimizer = StreamOptimizer()
+        
+        if doc_id is not None:
+            if not Document.objects.filter(id=doc_id, user=user).exists():
+                raise DocumentNotFoundError(
+                    "Document not found or does not belong to you.",
+                    details={"document_id": str(doc_id)},
+                )
 
         # -- Setup phase: failures raise before the generator is entered -------
 
@@ -326,11 +374,13 @@ class StreamQuestionService:
                 ) + "\n"
                 return
 
-            # -- BM25 rerank only (no LLM call — latency is priority) ----------
+            doc_count = len({d.metadata.get("document_id") for d in docs})
+            top_k = min(doc_count * settings.RERANK_TOP_K_PER_DOC, settings.RERANK_TOP_K_MAX)
+
             reranked_docs = BM25Reranker().rerank(
                 question=question,
                 documents=docs,
-                top_k=settings.RERANK_TOP_K,
+                top_k=top_k,
             )
             sources = optimizer.extract_sources(reranked_docs)
             context = "\n\n".join([d.page_content for d in reranked_docs])
@@ -378,3 +428,23 @@ class StreamQuestionService:
             IncrementQuestionCountService.execute(user_id=str(user.id))
 
         return _generator()
+    
+# ---------------------------------------------------------------------------
+# QuestionActivityListService — validates document ownership and returns
+# filtered QuestionActivity records for the given user
+# ---------------------------------------------------------------------------
+
+class QuestionActivityListService:
+    @staticmethod
+    def execute(*, user: User, filters: QuestionActivityListFilters | None = None):
+        raw: dict[str, Any] = cast(dict[str, Any], filters) if filters else {}
+        doc_id = raw.get("document_id")
+
+        if doc_id:
+            if not Document.objects.filter(id=doc_id, user=user).exists():
+                raise QuestionActivityNotFoundError(
+                    "Document not found or does not belong to you.",
+                    details={"document_id": str(doc_id)},
+                )
+
+        return question_activity_list(user=user, filters=filters)

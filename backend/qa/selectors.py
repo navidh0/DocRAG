@@ -30,17 +30,6 @@ def question_activity_list(
     filters: QuestionActivityListFilters | None = None,
 ):
     raw: dict[str, Any] = cast(dict[str, Any], filters) if filters else {}
-
-    doc_id = raw.get("document_id")
-    if doc_id:
-        from documents.models import Document
-
-        if not Document.objects.filter(id=doc_id, user=user).exists():
-            raise QuestionActivityNotFoundError(
-                "Document not found or does not belong to you.",
-                details={"document_id": str(doc_id)},
-            )
-
     qs = QuestionActivity.objects.filter(user=user).order_by("-created_at")
     return QuestionActivityFilter(raw, queryset=qs).qs
 

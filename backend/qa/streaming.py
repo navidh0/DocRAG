@@ -7,9 +7,10 @@ import logging
 import ollama
 import redis
 from django.conf import settings
+from documents.models import Document
 from langchain_postgres import PGVector
 
-from documents.utils import get_vector_store_connection
+from core.utils import get_vector_store_connection
 
 logger = logging.getLogger(__name__)
 
@@ -92,18 +93,36 @@ class StreamOptimizer:
         store = PGVector(
             collection_name="rag_collection",
             connection=connection,
-            embeddings=None,    # type: ignore[arg-type]
+            embeddings=None, #type: ignore
             use_jsonb=True,
         )
-        search_filter: dict = {"user_id": str(user_id)}
-        if doc_id:
-            search_filter["document_id"] = str(doc_id)
 
-        return store.similarity_search_by_vector(
-            embedding=query_vector,
-            k=k,
-            filter=search_filter,
+        if doc_id:
+            # Scoped — existing behaviour unchanged
+            search_filter: dict = {"user_id": str(user_id)}
+            search_filter["document_id"] = str(doc_id)
+            return store.similarity_search_by_vector(
+                embedding=query_vector,
+                k=k,
+                filter=search_filter,
+            )
+
+        user_doc_ids = list(
+            Document.objects.filter(user_id=user_id, status="completed")
+            .values_list("id", flat=True)
         )
+        docs = []
+        for d_id in user_doc_ids:
+            per_doc_chunks = store.similarity_search_by_vector(
+                embedding=query_vector,
+                k=settings.TOP_K_CHUNKS_PER_DOC,
+                filter={
+                    "user_id": str(user_id),
+                    "document_id": str(d_id),
+                },
+            )
+            docs.extend(per_doc_chunks)
+        return docs
 
     # ------------------------------------------------------------------
     # Buffered streaming

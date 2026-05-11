@@ -176,8 +176,8 @@ class HybridReranker:
     The streaming path uses BM25Reranker directly.
     """
 
-    def __init__(self) -> None:
-        self.top_k = settings.RERANK_TOP_K
+    def __init__(self, top_k: int) -> None:
+        self.top_k = top_k
         self.bm25_weight = settings.RERANK_BM25_WEIGHT
         self.llm_weight = settings.RERANK_LLM_WEIGHT
         self.bm25 = BM25Reranker()

@@ -19,7 +19,7 @@ from drf_spectacular.utils import (
 from drf_spectacular.types import OpenApiTypes
 
 from .pagination import QuestionActivityPagination
-from .selectors import QuestionActivityListFilters, question_activity_list, question_activity_stats
+from .selectors import QuestionActivityListFilters, question_activity_stats
 from .serializers import (
     AskQuestionInputSerializer,
     AskQuestionOutputSerializer,
@@ -33,6 +33,7 @@ from .services import (
     AskQuestionService,
     GetQuestionResultService,
     StreamQuestionService,
+    QuestionActivityListService,
 )
 
 
@@ -46,11 +47,15 @@ class QuestionAnsweringView(APIView):
             "Submits a question to the RAG pipeline and returns a `task_id` immediately. "
             "Embedding generation, vector retrieval, hybrid reranking, and LLM generation "
             "all run asynchronously in a Celery worker.\n\n"
+            "**Scoping:**\n"
+            "- Omit `document_id` to query across **all** documents belonging to the authenticated user.\n"
+            "- Provide `document_id` to scope retrieval to a **single document**. "
+            "Returns 404 if the document is not found or belongs to another user.\n"
+            "- Optionally narrow to a specific page (1-based) via `page`. "
+            "Only meaningful when `document_id` is also provided.\n\n"
             "**Flow:**\n"
             "1. `POST /api/qa/ask/` — receive `task_id` with `status: processing` (202)\n"
             "2. Poll `GET /api/qa/result/{task_id}/` until `status` is no longer `processing`\n\n"
-            "Optionally scope retrieval to a single document via `document_id`, "
-            "or to a specific page (1-based) via `page`. "
             "Use `POST /api/qa/stream/` if you prefer a streaming response."
         ),
         request=AskQuestionInputSerializer,
@@ -59,17 +64,32 @@ class QuestionAnsweringView(APIView):
             400: OpenApiResponse(
                 description="Validation error — question is blank or field types are invalid."
             ),
+            404: OpenApiResponse(
+                description=(
+                    "The specified `document_id` was not found or does not belong "
+                    "to the authenticated user."
+                )
+            ),
         },
         examples=[
             OpenApiExample(
                 name="Global question",
-                summary="Question across all documents",
+                summary="Question across all user documents",
                 request_only=True,
                 value={"question": "Summarise all uploaded documents."},
             ),
             OpenApiExample(
-                name="Scoped question",
-                summary="Question scoped to a document and page",
+                name="Scoped to document",
+                summary="Question scoped to a single document",
+                request_only=True,
+                value={
+                    "question": "What are the key findings in the annual report?",
+                    "document_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+                },
+            ),
+            OpenApiExample(
+                name="Scoped to document and page",
+                summary="Question scoped to a specific page within a document",
                 request_only=True,
                 value={
                     "question": "What are the key findings in the annual report?",
@@ -79,7 +99,7 @@ class QuestionAnsweringView(APIView):
             ),
             OpenApiExample(
                 name="Accepted",
-                summary="Task accepted, poll for result",
+                summary="Task accepted — poll for result",
                 response_only=True,
                 status_codes=["202"],
                 value={
@@ -208,6 +228,11 @@ class ChatStreamView(APIView):
             "Submits a question and streams the answer as newline-delimited JSON (NDJSON). "
             "Each line in the response body is a self-contained JSON object; "
             "parse line by line with `JSON.parse(line)` as data arrives.\n\n"
+            "**Scoping:**\n"
+            "- Omit `document_id` to stream an answer synthesised from **all** user documents.\n"
+            "- Provide `document_id` to scope retrieval to a **single document**. "
+            "Returns 404 before the stream opens if the document is not found "
+            "or belongs to another user.\n\n"
             "**Chunk shapes** — discriminated by the `status` field:\n\n"
             "| Shape | Condition | Fields |\n"
             "|---|---|---|\n"
@@ -217,8 +242,9 @@ class ChatStreamView(APIView):
             "Concatenate `token` values in arrival order to reconstruct the full answer. "
             "The stream closes after the terminal chunk (no-answer or error) "
             "or naturally after generation completes.\n\n"
-            "**Error before stream opens** — embedding or retrieval failures are returned "
-            "as standard DRF error responses (503 / 500) before any NDJSON is emitted. "
+            "**Errors before the stream opens** — ownership (404), validation (400), "
+            "embedding (503), and retrieval (500) failures all surface as standard DRF "
+            "error responses before any NDJSON is emitted. "
             "Use `POST /api/qa/ask/` if you prefer an async polling model."
         ),
         request=StreamQuestionInputSerializer,
@@ -260,7 +286,13 @@ class ChatStreamView(APIView):
                 ),
             ),
             400: OpenApiResponse(
-                description="Validation error — question is blank or document_id is malformed."
+                description="Validation error — question is blank or `document_id` is malformed."
+            ),
+            404: OpenApiResponse(
+                description=(
+                    "Document not found or does not belong to the authenticated user. "
+                    "Raised before the stream opens — response is standard JSON."
+                )
             ),
             503: OpenApiResponse(
                 description=(
@@ -276,6 +308,21 @@ class ChatStreamView(APIView):
             ),
         },
         examples=[
+            OpenApiExample(
+                name="Global stream",
+                summary="Stream across all user documents",
+                request_only=True,
+                value={"question": "Summarise all uploaded documents."},
+            ),
+            OpenApiExample(
+                name="Scoped stream",
+                summary="Stream scoped to a single document",
+                request_only=True,
+                value={
+                    "question": "What does section 3 cover?",
+                    "document_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+                },
+            ),
             OpenApiExample(
                 name="Token chunk",
                 summary="Mid-generation token fragment",
@@ -442,7 +489,7 @@ class QuestionActivityListView(APIView):
         filter_ser = QuestionActivityListFilterSerializer(data=request.query_params)
         filter_ser.is_valid(raise_exception=True)
 
-        activities = question_activity_list(
+        activities = QuestionActivityListService.execute(
             user=request.user,
             filters=cast(QuestionActivityListFilters, filter_ser.validated_data),
         )

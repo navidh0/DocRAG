@@ -7,7 +7,7 @@ from rest_framework.response import Response
 
 class QuestionActivityPagination(PageNumberPagination):
     """
-    Custom paginator for GET /api/qa/history/ and /api/qa/activity/.
+    Custom paginator for GET /api/qa/history/.
 
     Produces the envelope:
         {

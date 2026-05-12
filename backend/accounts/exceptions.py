@@ -1,40 +1,49 @@
+from __future__ import annotations
+
+from typing import Any
 from rest_framework import status
 
-class AccountsServiceError(Exception):
-    """
-    Base exception for all accounts-domain service errors.
-    Caught by core.exceptions.custom_exception_handler.
-    """
 
-    def __init__(self, message: str, details: dict | None = None, status_code: int = status.HTTP_400_BAD_REQUEST):
-        self.message = message
-        self.details = details or {}
-        self.status_code = status_code
+class AccountsServiceError(Exception):
+    status_code: int = status.HTTP_400_BAD_REQUEST
+
+    def __init__(self, message: str, status_code: int | None = None, details: dict[str, Any] | None = None) -> None:
         super().__init__(message)
+        self.message = message
+        self.details: dict[str, Any] = details or {}
+        if status_code is not None:
+            self.status_code = status_code
 
 
 class UserAlreadyExistsError(AccountsServiceError):
-    def __init__(self, field: str = "email"):
+    status_code: int = status.HTTP_409_CONFLICT
+
+    def __init__(self, field: str = "email") -> None:
         super().__init__(
             message="A user with this credential already exists.",
             details={field: "Already in use."},
-            status_code=status.HTTP_409_CONFLICT,
         )
+
+
+class UserNotFoundError(AccountsServiceError):
+    status_code: int = status.HTTP_404_NOT_FOUND
+
+    def __init__(self) -> None:
+        super().__init__(message="User not found.")
 
 
 class InvalidTokenError(AccountsServiceError):
-    def __init__(self):
-        super().__init__(
-            message="Invalid or expired token.",
-            details={},
-            status_code=status.HTTP_400_BAD_REQUEST,
-        )
+    status_code: int = status.HTTP_400_BAD_REQUEST
+
+    def __init__(self) -> None:
+        super().__init__(message="Invalid or expired token.")
 
 
 class MissingRefreshTokenError(AccountsServiceError):
-    def __init__(self):
+    status_code: int = status.HTTP_400_BAD_REQUEST
+
+    def __init__(self) -> None:
         super().__init__(
             message="Refresh token is missing.",
             details={"refresh": "Token not found in cookie."},
-            status_code=status.HTTP_400_BAD_REQUEST,
         )

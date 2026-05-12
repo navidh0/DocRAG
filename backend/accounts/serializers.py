@@ -1,3 +1,6 @@
+from __future__ import annotations
+from typing import Any
+
 from django.contrib.auth.password_validation import validate_password
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
@@ -59,7 +62,7 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
     this serializer simply exposes it so the view can extract and strip it.
     """
 
-    def validate(self, attrs):
-        data = super().validate(attrs)
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        data: dict[str, Any] = super().validate(attrs)
         data["user"] = UserOutputSerializer(self.user).data
         return data

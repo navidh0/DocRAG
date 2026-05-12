@@ -1,4 +1,5 @@
 from __future__ import annotations
+from typing import Any, cast
 
 from django.conf import settings
 from drf_spectacular.utils import OpenApiExample, OpenApiResponse, extend_schema
@@ -84,7 +85,7 @@ class RegisterView(APIView):
     def post(self, request):
         serializer = RegisterInputSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        data = serializer.validated_data
+        data = cast(dict[str, Any], serializer.validated_data)
 
         user = register_user(
             username=data["username"],
@@ -140,12 +141,11 @@ class LoginView(TokenObtainPairView):
     )
     def post(self, request, *args, **kwargs):
         response = super().post(request, *args, **kwargs)
-
         if response.status_code == status.HTTP_200_OK:
-            refresh_token = response.data.pop("refresh", None)
+            data = cast(dict[str, Any], response.data)
+            refresh_token = data.pop("refresh", None)
             if refresh_token:
                 _set_refresh_cookie(response, refresh_token)
-
         return response
 
 
@@ -186,11 +186,12 @@ class CookieTokenRefreshView(TokenRefreshView):
         if not refresh_token:
             raise MissingRefreshTokenError()
 
-        request.data["refresh"] = refresh_token
+        cast(dict[str, Any], request.data)["refresh"] = refresh_token
         response = super().post(request, *args, **kwargs)
 
         if response.status_code == status.HTTP_200_OK:
-            new_refresh = response.data.pop("refresh", None)
+            data = cast(dict[str, Any], response.data)
+            new_refresh = data.pop("refresh", None)
             if new_refresh:
                 _set_refresh_cookie(response, new_refresh)
         return response
@@ -302,7 +303,7 @@ class MeView(APIView):
     def patch(self, request):
         serializer = UserUpdateInputSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        data = serializer.validated_data
+        data = cast(dict[str, Any], serializer.validated_data)
 
         user = update_user_profile(
             user=request.user,

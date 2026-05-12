@@ -49,7 +49,7 @@ def logout_user(*, refresh_token: str | None) -> None:
         raise MissingRefreshTokenError()
 
     try:
-        token = RefreshToken(refresh_token)
+        token = RefreshToken(refresh_token)  # type: ignore[arg-type]
         token.blacklist()
         logger.info("Refresh token blacklisted.")
     except Exception:

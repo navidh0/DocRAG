@@ -2,6 +2,7 @@
 import pytest
 from django.contrib.auth import get_user_model
 from rest_framework import status
+from accounts.views import REFRESH_COOKIE_NAME
 
 User = get_user_model()
 
@@ -63,7 +64,7 @@ class TestUserRegistration:
         }
         response = api_client.post('/api/auth/register/', data)
         
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert response.status_code == status.HTTP_409_CONFLICT
         assert User.objects.filter(username='testuser').count() == 1
     
     def test_register_with_duplicate_email(self, test_user, api_client):
@@ -76,7 +77,7 @@ class TestUserRegistration:
         }
         response = api_client.post('/api/auth/register/', data)
         
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert response.status_code == status.HTTP_409_CONFLICT
 
 
 @pytest.mark.auth
@@ -85,16 +86,13 @@ class TestUserLogin:
     """Test user login endpoint."""
     
     def test_login_with_correct_credentials(self, test_user, api_client):
-        """Test successful login."""
-        data = {
-            'username': 'testuser',
-            'password': 'TestPass123!'
-        }
+        data = {'username': 'testuser', 'password': 'TestPass123!'}
         response = api_client.post('/api/auth/login/', data)
-        
+
         assert response.status_code == status.HTTP_200_OK
         assert 'access' in response.data
-        assert 'refresh' in response.data
+        assert 'refresh' not in response.data                        # refresh is in cookie now
+        assert REFRESH_COOKIE_NAME in response.cookies               # verify cookie was set
         assert response.data['user']['username'] == 'testuser'
     
     def test_login_with_incorrect_password(self, test_user, api_client):
@@ -182,25 +180,17 @@ class TestTokenRefresh:
     """Test JWT token refresh functionality."""
     
     def test_refresh_access_token(self, test_user, api_client):
-        """Test refreshing access token."""
-        # First login to get tokens
-        login_data = {
-            'username': 'testuser',
-            'password': 'TestPass123!'
-        }
-        login_response = api_client.post('/api/auth/login/', login_data)
-        refresh_token = login_response.data['refresh']
-        
-        # Then refresh
-        refresh_data = {'refresh': refresh_token}
-        response = api_client.post('/api/auth/refresh/', refresh_data)
-        
+        login_data = {'username': 'testuser', 'password': 'TestPass123!'}
+        api_client.post('/api/auth/login/', login_data)              # cookie stored on client automatically
+
+        response = api_client.post('/api/auth/refresh/')             # cookie sent automatically
+
         assert response.status_code == status.HTTP_200_OK
         assert 'access' in response.data
+        assert 'refresh' not in response.data    
     
     def test_refresh_with_invalid_token(self, api_client):
-        """Test refresh fails with invalid token."""
-        refresh_data = {'refresh': 'invalid.token.here'}
-        response = api_client.post('/api/auth/refresh/', refresh_data)
-        
+        api_client.cookies['refresh_token'] = 'invalid.token.here'  # set bad token in cookie
+        response = api_client.post('/api/auth/refresh/')
+
         assert response.status_code == status.HTTP_401_UNAUTHORIZED

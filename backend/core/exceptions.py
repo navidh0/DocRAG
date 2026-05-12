@@ -1,9 +1,12 @@
 from rest_framework.views import exception_handler
 from rest_framework.response import Response
+
+from accounts.exceptions import AccountsServiceError
 from qa.exceptions import QAServiceError
 from documents.exceptions import DocumentsServicesError
 
-_HANDLED = (DocumentsServicesError, QAServiceError)
+_HANDLED = (DocumentsServicesError, QAServiceError, AccountsServiceError)
+
 
 def custom_exception_handler(exc, context):
     if isinstance(exc, _HANDLED):

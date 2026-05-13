@@ -2,6 +2,8 @@ x-backend-common: &backend-common
   build: ./backend
   env_file:
     - .env
+  environment:
+    DJANGO_SETTINGS_MODULE: core.settings.docker
   volumes:
     - ./backend:/app
     - media_volume:/app/media
@@ -50,9 +52,9 @@ services:
     container_name: rag_web
     command: >
       sh -c "python manage.py migrate &&
-             python manage.py collectstatic --noinput &&
-             python manage.py runserver 0.0.0.0:8000"
-    volumes:
+            python manage.py collectstatic --noinput &&
+            gunicorn core.wsgi:application --bind 0.0.0.0:8000 --workers 2 --timeout 120 --log-level debug"
+        volumes:
       - ./backend:/app
       - static_volume:/app/staticfiles
       - media_volume:/app/media

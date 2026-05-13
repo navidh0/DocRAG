@@ -4,10 +4,13 @@ djangorestframework==3.15.2
 djangorestframework_simplejwt==5.3.1
 django-environ==0.11.2
 django-filter==24.3
+django-cors-headers
 drf-spectacular==0.27.2
 drf-spectacular-sidecar
 requests==2.31.0
 networkx
+gunicorn
+whitenoise
 
 # --- Database & Vectors ---
 # psycopg (v3) is the preferred driver for langchain-postgres

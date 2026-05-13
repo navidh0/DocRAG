@@ -4,7 +4,9 @@ from django.utils.timezone import now
 from datetime import timedelta
 
 import pytest
+from unittest.mock import patch, MagicMock
 
+from django.db import ProgrammingError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from rest_framework import status
 from rest_framework.test import APIClient
@@ -278,16 +280,15 @@ class TestDocumentStatus:
         assert "chunks" not in response.data
 
     def test_include_chunks_true_adds_chunk_fields(self, authenticated_client, test_user, make_document):
-        """
-        langchain_pg_embedding table won't exist in test DB.
-        DebugDocumentChunksService catches ProgrammingError and returns 0 chunks gracefully.
-        """
         doc = make_document(user=test_user, status="completed")
-        response = authenticated_client.get(f"/api/documents/{doc.id}/status/?include_chunks=true")
+
+        with patch("django.db.connection.cursor") as mock_cursor:
+            mock_cursor.return_value.__enter__ = MagicMock(side_effect=ProgrammingError("langchain_pg_embedding"))
+            mock_cursor.return_value.__exit__ = MagicMock(return_value=False)
+
+            response = authenticated_client.get(f"/api/documents/{doc.id}/status/?include_chunks=true")
 
         assert response.status_code == status.HTTP_200_OK
-        assert "total_chunks" in response.data
-        assert "chunks" in response.data
         assert response.data["total_chunks"] == 0
         assert response.data["chunks"] == []
 

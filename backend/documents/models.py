@@ -1,6 +1,7 @@
 import uuid
 from django.db import models
 from django.conf import settings
+from django.utils import timezone
 
 def user_directory_path(instance, filename):
     return f'uploads/user_{instance.user.id}/{filename}'
@@ -24,7 +25,7 @@ class Document(models.Model):
     file_name = models.CharField(max_length=255)
     file_type = models.CharField(max_length=10) 
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
-    created_at = models.DateTimeField(auto_now_add=True)
+    created_at = models.DateTimeField(default=timezone.now)
 
     class Meta:
         ordering = ['-created_at']

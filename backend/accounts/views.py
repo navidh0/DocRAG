@@ -17,8 +17,8 @@ from .serializers import (
 )
 from .services import logout_user, register_user, update_user_profile
 
-REFRESH_COOKIE_NAME = "refresh_token"
-REFRESH_COOKIE_PATH = "/api/auth/"
+REFRESH_COOKIE_NAME = settings.REFRESH_COOKIE_NAME
+REFRESH_COOKIE_PATH = settings.REFRESH_COOKIE_PATH
 
 # ---------------------------------------------------------------------------
 # Cookie helpers
@@ -29,16 +29,15 @@ def _set_refresh_cookie(response: Response, refresh_token: str) -> None:
         key=REFRESH_COOKIE_NAME,
         value=refresh_token,
         httponly=True,
-        secure=not settings.DEBUG,   # HTTPS-only in production
-        samesite="Lax",
+        secure=settings.REFRESH_COOKIE_SECURE,
+        samesite=settings.REFRESH_COOKIE_SAMESITE,
         path=REFRESH_COOKIE_PATH,
-        max_age=int(settings.SIMPLE_JWT["REFRESH_TOKEN_LIFETIME"].total_seconds()),
+        max_age=settings.REFRESH_COOKIE_MAX_AGE,
     )
 
 
 def _delete_refresh_cookie(response: Response) -> None:
     response.delete_cookie(key=REFRESH_COOKIE_NAME, path=REFRESH_COOKIE_PATH)
-
 
 # ---------------------------------------------------------------------------
 # Register
@@ -70,7 +69,7 @@ class RegisterView(APIView):
                                 "username": "navid",
                                 "email": "navid@example.com",
                                 "question_count": 0,
-                                "created_at": "2024-01-01T00:00:00Z",
+                                "created_at": "2026-01-01T00:00:00Z",
                             },
                         },
                         response_only=True,
@@ -128,7 +127,7 @@ class LoginView(TokenObtainPairView):
                                 "username": "navid",
                                 "email": "navid@example.com",
                                 "question_count": 0,
-                                "created_at": "2024-01-01T00:00:00Z",
+                                "created_at": "2026-01-01T00:00:00Z",
                             },
                         },
                         response_only=True,
@@ -262,7 +261,7 @@ class MeView(APIView):
                             "username": "navid",
                             "email": "navid@example.com",
                             "question_count": 12,
-                            "created_at": "2024-01-01T00:00:00Z",
+                            "created_at": "2026-01-01T00:00:00Z",
                         },
                         response_only=True,
                         status_codes=["200"],
@@ -289,7 +288,7 @@ class MeView(APIView):
                             "username": "navid_updated",
                             "email": "new@example.com",
                             "question_count": 12,
-                            "created_at": "2024-01-01T00:00:00Z",
+                            "created_at": "2026-01-01T00:00:00Z",
                         },
                         response_only=True,
                         status_codes=["200"],

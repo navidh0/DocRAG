@@ -93,6 +93,7 @@ class QuestionActivityOutputSerializer(serializers.ModelSerializer):
         model = QuestionActivity
         fields = [
             "id",
+            "task_id",
             "question",
             "answer",
             "document_id",

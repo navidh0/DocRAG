@@ -4,6 +4,7 @@ from .process import ProcessQuestionService
 from .activity import (
     GetQuestionResultService,
     IncrementQuestionCountService,
+    QuestionActivityCreateService,  
     QuestionActivityListService,
 )
 
@@ -13,5 +14,6 @@ __all__ = [
     "ProcessQuestionService",
     "GetQuestionResultService",
     "IncrementQuestionCountService",
+    "QuestionActivityCreateService",  
     "QuestionActivityListService",
 ]

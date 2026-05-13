@@ -22,6 +22,7 @@ class QuestionActivity(models.Model):
         blank=True,
         related_name='questions'
     )
+    task_id = models.UUIDField(null=True, blank=True, db_index=True)
     question = models.TextField()
     answer = models.TextField()
     sources = models.JSONField(default=list)

@@ -8,10 +8,9 @@ from django.conf import settings
 from qa.exceptions import (
     DocumentRetrievalError,
     EmbeddingGenerationError,
-    OllamaUnavailableError,
 )
 from qa.models import QuestionActivity
-from .activity import IncrementQuestionCountService
+from .activity import IncrementQuestionCountService, QuestionActivityCreateService
 from .embedding import get_query_embedding
 from .retrieval import retrieve_documents
 from .reranking import HybridReranker
@@ -30,6 +29,7 @@ class ProcessQuestionService:
         user_id: str,
         doc_id: str | None,
         page_filter: int | None,
+        task_id: str | None = None,
     ) -> dict:
         start_time = time.time()
 
@@ -61,14 +61,15 @@ class ProcessQuestionService:
 
         # -- Step 3: No results ------------------------------------------------
         if not docs:
-            QuestionActivity.objects.create(
+            QuestionActivityCreateService.execute(
                 user_id=user_id,
-                document_id=doc_id,
+                doc_id=doc_id,
                 question=question,
                 answer="I could not find relevant information in the provided documents.",
                 sources=[],
                 response_time_ms=execution_time,
                 status="no_answer",
+                task_id=task_id,
             )
             IncrementQuestionCountService.execute(user_id=user_id)
             return {
@@ -119,19 +120,27 @@ class ProcessQuestionService:
             )["response"].strip()
         except Exception as exc:
             execution_time = int((time.time() - start_time) * 1000)
-            QuestionActivity.objects.create(
+            QuestionActivityCreateService.execute(
                 user_id=user_id,
-                document_id=doc_id,
+                doc_id=doc_id,
                 question=question,
                 answer="An error occurred during answer generation.",
                 sources=[],
                 response_time_ms=execution_time,
                 status="error",
+                task_id=task_id,
             )
-            raise OllamaUnavailableError(
-                "Ollama service is unreachable during answer generation.",
-                details={"error": str(exc)},
-            ) from exc
+            logger.error(
+                "[ProcessQuestionService] Ollama generation failed. user_id=%s error=%s",
+                user_id,
+                exc,
+            )
+            return {
+                "status": "error",
+                "answer": "An error occurred during answer generation.",
+                "sources": [],
+                "response_time_ms": execution_time,
+            }
 
         # -- Step 7: Sources, persist, increment -------------------------------
         sources = extract_sources(reranked_docs)
@@ -145,6 +154,7 @@ class ProcessQuestionService:
             sources=sources,
             response_time_ms=execution_time,
             status="success",
+            task_id=task_id
         )
         IncrementQuestionCountService.execute(user_id=user_id)
 

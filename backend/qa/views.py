@@ -130,13 +130,16 @@ class QuestionResultView(APIView):
         summary="Poll question result",
         description=(
             "Retrieves the result of an async question submitted via `POST /api/qa/ask/`.\n\n"
+            "**HTTP status reflects whether the poll request succeeded, not the task outcome.** "
+            "A task that failed inside the Celery worker is still a completed, retrievable result — "
+            "the poll itself succeeded (200). Only infrastructure failures surface as non-2xx.\n\n"
             "**Response by status:**\n\n"
             "| `status` | HTTP | Meaning |\n"
             "|---|---|---|\n"
             "| `processing` | 202 | Worker hasn't finished — poll again |\n"
             "| `success` | 200 | Answer and sources are present |\n"
             "| `no_answer` | 200 | No relevant chunks found in the documents |\n"
-            "| `error` | 200 | LLM generation failed inside the worker |\n\n"
+            "| `error` | 200 | LLM generation failed inside the worker — answer field contains fallback message |\n\n"
             "Poll at a reasonable cadence (e.g. every 1–2 s). "
             "Task results expire after the Celery result backend TTL "
             "— a missing task returns 404."
@@ -472,6 +475,7 @@ class QuestionActivityListView(APIView):
                     "activities": [
                         {
                             "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+                            "task_id": "a1b2c3d4-0000-4562-b3fc-2c963f66afa6",  # ← new
                             "question": "What are the key findings?",
                             "answer": "The key findings include a 12% revenue increase...",
                             "document_id": "7cb12f64-1234-4562-b3fc-2c963f66afa6",

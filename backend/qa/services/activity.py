@@ -9,11 +9,35 @@ from celery.result import AsyncResult
 from documents.selectors import document_exists_for_user
 from qa.exceptions import QAServiceError, QuestionActivityNotFoundError
 from qa.selectors import QuestionActivityListFilters, question_activity_list
+from qa.models import QuestionActivity
 
 if TYPE_CHECKING:
     from accounts.models import User
 
-
+class QuestionActivityCreateService:
+    @staticmethod
+    def execute(
+        *,
+        user_id: str,
+        doc_id: str | None,
+        question: str,
+        answer: str,
+        sources: list,
+        response_time_ms: int,
+        status: str,
+        task_id: str | None = None,
+    ) -> QuestionActivity:
+        return QuestionActivity.objects.create(
+            user_id=user_id,
+            document_id=doc_id,
+            question=question,
+            answer=answer,
+            sources=sources,
+            response_time_ms=response_time_ms,
+            status=status,
+            task_id=task_id,
+        )
+        
 class IncrementQuestionCountService:
     @staticmethod
     def execute(*, user_id: str) -> None:

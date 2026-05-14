@@ -1,13 +1,7 @@
-# core/settings/local.py
 from core.settings.base import *
 
 DEBUG = True
 ALLOWED_HOSTS = ["*"]
-
-# BrowsableAPI only in local
-REST_FRAMEWORK["DEFAULT_RENDERER_CLASSES"] += [
-    "rest_framework.renderers.BrowsableAPIRenderer",
-]
 
 DATABASES = {
     "default": env.db(
@@ -16,6 +10,31 @@ DATABASES = {
     )
 }
 
-# Louder logging locally
-for logger in LOGGING["loggers"].values():
-    logger["level"] = "DEBUG"
+MIDDLEWARE = [
+    "django.middleware.security.SecurityMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",
+    *MIDDLEWARE[1:],
+]
+
+WHITENOISE_ROOT = BASE_DIR / "staticfiles"
+
+SPECTACULAR_SETTINGS = {
+    **SPECTACULAR_SETTINGS,
+    "SERVE_INCLUDE_SCHEMA": True,
+}
+
+REST_FRAMEWORK = {
+    **REST_FRAMEWORK,
+    "DEFAULT_RENDERER_CLASSES": [
+        "rest_framework.renderers.JSONRenderer",
+        "rest_framework.renderers.BrowsableAPIRenderer",
+    ],
+}
+
+LOGGING = {
+    **LOGGING,
+    "loggers": {
+        name: {**cfg, "level": "DEBUG"}
+        for name, cfg in LOGGING["loggers"].items()
+    },
+}

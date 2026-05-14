@@ -112,7 +112,7 @@ class ProcessQuestionService:
 
         # -- Step 6: Generate answer -------------------------------------------
         try:
-            client = ollama.Client(host=settings.OLLAMA_BASE_URL)
+            client = ollama.Client(host=settings.OLLAMA_BASE_URL, timeout=settings.OLLAMA_TIMEOUT)
             answer = client.generate(
                 model=settings.OLLAMA_CHAT_MODEL,
                 prompt=prompt,

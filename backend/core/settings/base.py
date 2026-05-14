@@ -1,4 +1,3 @@
-# core/settings/base.py
 from __future__ import annotations
 
 from datetime import timedelta
@@ -82,16 +81,6 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
-
-# ---------------------------------------------------------------------------
-# Database
-# ---------------------------------------------------------------------------
-
-DATABASE_URL = env("DATABASE_URL", default="postgresql://raguser:ragpassword@localhost:5432/ragdb")
-
-DATABASES = {
-    "default": env.db("DATABASE_URL", default="postgresql://raguser:ragpassword@localhost:5432/ragdb")
-}
 
 # ---------------------------------------------------------------------------
 # CORS / CSRF
@@ -185,6 +174,7 @@ CELERY_ENABLE_UTC = True
 OLLAMA_BASE_URL = env("OLLAMA_BASE_URL", default="http://localhost:11434")
 OLLAMA_EMBED_MODEL = env("OLLAMA_EMBED_MODEL", default="embeddinggemma")
 OLLAMA_CHAT_MODEL = env("OLLAMA_CHAT_MODEL", default="gemma4")
+OLLAMA_TIMEOUT = env.int("OLLAMA_TIMEOUT", default=10)
 
 # ---------------------------------------------------------------------------
 # Chunking / Retrieval / Reranking

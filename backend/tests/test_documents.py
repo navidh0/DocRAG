@@ -282,9 +282,12 @@ class TestDocumentStatus:
     def test_include_chunks_true_adds_chunk_fields(self, authenticated_client, test_user, make_document):
         doc = make_document(user=test_user, status="completed")
 
-        with patch("django.db.connection.cursor") as mock_cursor:
-            mock_cursor.return_value.__enter__ = MagicMock(side_effect=ProgrammingError("langchain_pg_embedding"))
-            mock_cursor.return_value.__exit__ = MagicMock(return_value=False)
+        mock_cursor = MagicMock()
+        mock_cursor.__enter__ = MagicMock(side_effect=ProgrammingError("langchain_pg_embedding"))
+        mock_cursor.__exit__ = MagicMock(return_value=False)
+
+        with patch("documents.services.document.connection") as mock_connection:
+            mock_connection.cursor.return_value = mock_cursor
 
             response = authenticated_client.get(f"/api/documents/{doc.id}/status/?include_chunks=true")
 

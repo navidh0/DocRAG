@@ -1,4 +1,5 @@
-from django.conf import settings
+from core.settings.env import env
 
 def get_vector_store_connection() -> str:
-    return settings.DATABASE_URL.replace("postgresql://", "postgresql+psycopg://")
+    url = env("DATABASE_URL", default="postgresql://raguser:ragpassword@localhost:5432/ragdb")
+    return url.replace("postgresql://", "postgresql+psycopg://")

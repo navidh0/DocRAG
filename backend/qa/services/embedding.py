@@ -45,7 +45,7 @@ def get_query_embedding(question: str) -> list[float]:
             logger.warning("[embedding] Redis read failed: %s", exc)
 
     try:
-        client = ollama.Client(host=settings.OLLAMA_BASE_URL)
+        client = ollama.Client(host=settings.OLLAMA_BASE_URL, timeout=settings.OLLAMA_TIMEOUT)
         embedding = client.embed(
             model=settings.OLLAMA_EMBED_MODEL,
             input=question,

@@ -1,7 +1,5 @@
-# core/settings/test.py
 from core.settings.base import *
 
-# Never hits Docker or real services
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",

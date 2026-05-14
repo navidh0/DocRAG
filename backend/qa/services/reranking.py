@@ -103,7 +103,7 @@ class LLMReranker:
     """
 
     def __init__(self) -> None:
-        self.client = ollama.Client(host=settings.OLLAMA_BASE_URL)
+        self.client = ollama.Client(host=settings.OLLAMA_BASE_URL, timeout=settings.OLLAMA_TIMEOUT)
         self.model = settings.OLLAMA_CHAT_MODEL
 
     @staticmethod

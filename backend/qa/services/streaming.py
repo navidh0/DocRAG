@@ -16,7 +16,7 @@ def stream_response_buffered(prompt: str, buffer_size: int = 3):
     Buffers `buffer_size` tokens before yielding to reduce
     the number of HTTP chunks sent to the client.
     """
-    client = ollama.Client(host=settings.OLLAMA_BASE_URL)
+    client = ollama.Client(host=settings.OLLAMA_BASE_URL, timeout=settings.OLLAMA_TIMEOUT)
     buffer: list[str] = []
 
     for chunk in client.generate(

@@ -86,7 +86,7 @@ class ProcessDocumentService:
 
     @staticmethod
     def _generate_embeddings(texts: list[str]) -> list[list[float]]:
-        client = ollama.Client(host=settings.OLLAMA_BASE_URL)
+        client = ollama.Client(host=settings.OLLAMA_BASE_URL, timeout=settings.OLLAMA_TIMEOUT)
         response = client.embed(model=settings.OLLAMA_EMBED_MODEL, input=texts)
         return response["embeddings"]
 

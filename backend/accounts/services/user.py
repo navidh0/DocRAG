@@ -39,7 +39,7 @@ def update_user_profile(*, user: User, username: str | None = None, email: str |
     if username:
         user.username = username
 
-    user.save(update_fields=["email", "username", "updated_at"])
+    user.save(update_fields=["email", "username"])
     logger.info("User profile updated: id=%s", user.id)
     return user
 

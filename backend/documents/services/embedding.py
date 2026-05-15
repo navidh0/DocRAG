@@ -27,7 +27,10 @@ class ProcessDocumentService:
     def execute(document_id: UUID) -> None:
         logger.info("Processing started: id=%s", document_id)
 
-        updated = Document.objects.filter(id=document_id, status="pending").update(status="processing")
+        updated = Document.objects.filter(
+            id=document_id, status=Document.Status.PENDING
+        ).update(status=Document.Status.PROCESSING)
+        
         if updated == 0:
             logger.warning("Processing skipped — document not in pending state: id=%s", document_id)
             return
@@ -45,17 +48,17 @@ class ProcessDocumentService:
             embeddings = ProcessDocumentService._generate_embeddings(texts)
             ProcessDocumentService._store_embeddings(doc, splits, texts, embeddings)
 
-            doc.status = "completed"
+            doc.status = Document.Status.COMPLETED
             logger.info("Processing completed: id=%s chunks=%d", document_id, len(texts))
 
         except DocumentProcessingError as exc:
             logger.warning("Processing failed — expected error: id=%s reason=%s", document_id, exc.message)
-            doc.status = "failed"
+            doc.status = Document.Status.FAILED
             raise
 
         except Exception:
             logger.error("Processing failed — unexpected error: id=%s", document_id, exc_info=True)
-            doc.status = "failed"
+            doc.status = Document.Status.FAILED
             raise
 
         finally:

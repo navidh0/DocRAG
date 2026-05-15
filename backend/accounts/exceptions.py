@@ -1,19 +1,11 @@
 from __future__ import annotations
 
-from typing import Any
 from rest_framework import status
+from core.exceptions import AppError
 
 
-class AccountsServiceError(Exception):
+class AccountsServiceError(AppError):
     status_code: int = status.HTTP_400_BAD_REQUEST
-
-    def __init__(self, message: str, status_code: int | None = None, details: dict[str, Any] | None = None) -> None:
-        super().__init__(message)
-        self.message = message
-        self.details: dict[str, Any] = details or {}
-        if status_code is not None:
-            self.status_code = status_code
-
 
 class UserAlreadyExistsError(AccountsServiceError):
     status_code: int = status.HTTP_409_CONFLICT

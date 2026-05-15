@@ -11,7 +11,7 @@ from documents.exceptions import DocumentNotFoundError
 from documents.selectors import document_exists_for_user
 from qa.exceptions import DocumentRetrievalError, EmbeddingGenerationError
 from qa.models import QuestionActivity
-from .activity import IncrementQuestionCountService
+from .activity import IncrementQuestionCountService, QuestionActivityCreateService
 from .embedding import get_query_embedding
 from .retrieval import retrieve_documents
 from .reranking import BM25Reranker
@@ -80,9 +80,9 @@ class StreamQuestionService:
         def _generator():
             if not docs:
                 execution_time = int((time.time() - start_time) * 1000)
-                QuestionActivity.objects.create(
-                    user=user,
-                    document_id=doc_id,
+                QuestionActivityCreateService.execute(
+                    user_id=str(user.id),
+                    doc_id=str(doc_id) if doc_id else None,
                     question=question,
                     answer="No relevant information found.",
                     sources=[],
@@ -118,9 +118,9 @@ class StreamQuestionService:
             except Exception as exc:
                 logger.error("[StreamQuestionService] Mid-stream error: %s", exc)
                 execution_time = int((time.time() - start_time) * 1000)
-                QuestionActivity.objects.create(
-                    user=user,
-                    document_id=doc_id,
+                QuestionActivityCreateService.execute(
+                    user_id=str(user.id),
+                    doc_id=str(doc_id) if doc_id else None,
                     question=question,
                     answer="Stream interrupted.",
                     sources=sources,
@@ -133,9 +133,9 @@ class StreamQuestionService:
 
             # -- Post-stream side effects --------------------------------------
             execution_time = int((time.time() - start_time) * 1000)
-            QuestionActivity.objects.create(
-                user=user,
-                document_id=doc_id,
+            QuestionActivityCreateService.execute(
+                user_id=str(user.id),
+                doc_id=str(doc_id) if doc_id else None,
                 question=question,
                 answer=full_response,
                 sources=sources,

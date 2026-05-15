@@ -3,10 +3,9 @@ from __future__ import annotations
 from rest_framework import serializers
 from .models import Document
 
-ALLOWED_EXTENSIONS = {'pdf', 'xlsx', 'xls', 'txt', 'csv'}
-
-STATUS_CHOICES = ['pending', 'processing', 'completed', 'failed']
-FILE_TYPE_CHOICES = ['pdf', 'xlsx', 'xls', 'txt', 'csv']
+ALLOWED_EXTENSIONS = {choice[0] for choice in Document.FileType.choices}
+STATUS_CHOICES = [choice[0] for choice in Document.Status.choices]
+FILE_TYPE_CHOICES = [choice[0] for choice in Document.FileType.choices]
 
 
 # =========================

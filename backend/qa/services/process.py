@@ -146,15 +146,15 @@ class ProcessQuestionService:
         sources = extract_sources(reranked_docs)
         execution_time = int((time.time() - start_time) * 1000)
 
-        QuestionActivity.objects.create(
+        QuestionActivityCreateService.execute(
             user_id=user_id,
-            document_id=doc_id,
+            doc_id=doc_id,
             question=question,
             answer=answer,
             sources=sources,
             response_time_ms=execution_time,
             status="success",
-            task_id=task_id
+            task_id=task_id,
         )
         IncrementQuestionCountService.execute(user_id=user_id)
 

@@ -174,7 +174,7 @@ CELERY_ENABLE_UTC = True
 OLLAMA_BASE_URL = env("OLLAMA_BASE_URL", default="http://localhost:11434")
 OLLAMA_EMBED_MODEL = env("OLLAMA_EMBED_MODEL", default="embeddinggemma")
 OLLAMA_CHAT_MODEL = env("OLLAMA_CHAT_MODEL", default="gemma4")
-OLLAMA_TIMEOUT = env.int("OLLAMA_TIMEOUT", default=10)
+OLLAMA_TIMEOUT = env.int("OLLAMA_TIMEOUT", default=120)
 
 # ---------------------------------------------------------------------------
 # Chunking / Retrieval / Reranking

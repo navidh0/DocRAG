@@ -36,10 +36,9 @@ def document_get(*, user: User, document_id: UUID) -> Document:
     
 def completed_document_ids_for_user(*, user_id: str) -> list:
     return list(
-        Document.objects.filter(user_id=user_id, status="completed")
+        Document.objects.filter(user_id=user_id, status=Document.Status.COMPLETED)
         .values_list("id", flat=True)
     )
-
 
 def document_exists_for_user(*, doc_id: UUID, user: User) -> bool:
     return Document.objects.filter(id=doc_id, user=user).exists()

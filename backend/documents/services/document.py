@@ -9,7 +9,8 @@ from django.db import connection, transaction
 from django.db import ProgrammingError
 
 from documents.models import Document
-from documents.exceptions import DocumentNotFoundError
+from documents.exceptions import DocumentServicesError
+from documents.selectors import document_get
 
 if TYPE_CHECKING:
     from accounts.models import User
@@ -32,12 +33,7 @@ class CreateDocumentService:
 class DeleteDocumentService:
     @staticmethod
     def execute(*, user: User, document_id: UUID) -> dict[str, str]:
-        try:
-            doc = Document.objects.get(id=document_id, user=user)
-        except Document.DoesNotExist:
-            logger.warning("Delete failed — document not found: id=%s user=%s", document_id, user.id)
-            raise DocumentNotFoundError("Document not found")
-
+        doc = document_get(user=user, document_id=document_id)
         data: dict[str, str] = {"id": str(doc.id), "file_name": doc.file_name}
         doc.delete()
         logger.info("Document deleted: id=%s file_name=%s user=%s", document_id, data["file_name"], user.id)
@@ -46,20 +42,15 @@ class DeleteDocumentService:
 
 class GetDocumentStatusService:
     STATUS_DESCRIPTIONS: dict[str, str] = {
-        "pending": "Waiting to be processed",
-        "processing": "Extracting text and generating embeddings...",
-        "completed": "Ready for Q&A",
-        "failed": "Processing failed. Check file format or logs.",
+        Document.Status.PENDING: "Waiting to be processed",
+        Document.Status.PROCESSING: "Extracting text and generating embeddings...",
+        Document.Status.COMPLETED: "Ready for Q&A",
+        Document.Status.FAILED: "Processing failed. Check file format or logs.",
     }
 
     @classmethod
     def execute(cls, *, user: User, document_id: UUID) -> dict[str, str]:
-        try:
-            doc = Document.objects.get(id=document_id, user=user)
-        except Document.DoesNotExist:
-            logger.warning("Status fetch failed — document not found: id=%s user=%s", document_id, user.id)
-            raise DocumentNotFoundError("Document not found")
-
+        doc = document_get(user=user, document_id=document_id)  
         return {
             "id": str(doc.id),
             "file_name": doc.file_name,

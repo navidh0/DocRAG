@@ -7,6 +7,7 @@ from rest_framework import permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
+from rest_framework_simplejwt.exceptions import TokenError, InvalidToken
 
 from .exceptions import MissingRefreshTokenError
 from .serializers import (
@@ -185,14 +186,19 @@ class CookieTokenRefreshView(TokenRefreshView):
         if not refresh_token:
             raise MissingRefreshTokenError()
 
-        cast(dict[str, Any], request.data)["refresh"] = refresh_token
-        response = super().post(request, *args, **kwargs)
+        serializer = self.get_serializer(data={"refresh": refresh_token})
 
-        if response.status_code == status.HTTP_200_OK:
-            data = cast(dict[str, Any], response.data)
-            new_refresh = data.pop("refresh", None)
-            if new_refresh:
-                _set_refresh_cookie(response, new_refresh)
+        try:
+            serializer.is_valid(raise_exception=True)
+        except TokenError as e:
+            raise InvalidToken(e.args[0]) from e  # InvalidToken is a DRF APIException → 401
+
+        response = Response(serializer.validated_data, status=status.HTTP_200_OK)
+
+        new_refresh = response.data.pop("refresh", None)
+        if new_refresh:
+            _set_refresh_cookie(response, new_refresh)
+
         return response
 
 

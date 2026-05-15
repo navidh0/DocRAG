@@ -20,8 +20,9 @@ def _get_redis_client():
         return None
 
 
-def _cache_key(text: str) -> str:
-    return f"embedding:{hashlib.md5(text.encode()).hexdigest()}"
+def _cache_key(text: str, model: str) -> str:
+    payload = f"{model}:{text}"
+    return f"embedding:{hashlib.md5(payload.encode()).hexdigest()}"
 
 
 def get_query_embedding(question: str) -> list[float]:
@@ -34,7 +35,7 @@ def get_query_embedding(question: str) -> list[float]:
     changes, flush the embedding:* keyspace manually or wait for TTL expiry.
     """
     redis_client = _get_redis_client()
-    cache_key = _cache_key(question)
+    cache_key = _cache_key(question, settings.OLLAMA_EMBED_MODEL)
 
     if redis_client:
         try:

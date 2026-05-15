@@ -1,25 +1,11 @@
 from __future__ import annotations
 
-from typing import Any
-
+from core.exceptions import AppError
 from rest_framework import status
 
 
-class QAServiceError(Exception):
+class QAServiceError(AppError):
     status_code = status.HTTP_400_BAD_REQUEST
-
-    def __init__(
-        self,
-        message: str,
-        status_code: int | None = None,
-        details=None,
-    ) -> None:
-        super().__init__(message)
-        self.message = message
-        self.details: dict[str, Any] = details or {}
-        if status_code is not None:
-            self.status_code = status_code
-
 
 class EmbeddingGenerationError(QAServiceError):
     status_code: int = status.HTTP_503_SERVICE_UNAVAILABLE

@@ -9,7 +9,6 @@ from qa.exceptions import (
     DocumentRetrievalError,
     EmbeddingGenerationError,
 )
-from qa.models import QuestionActivity
 from .activity import IncrementQuestionCountService, QuestionActivityCreateService
 from .embedding import get_query_embedding
 from .retrieval import retrieve_documents

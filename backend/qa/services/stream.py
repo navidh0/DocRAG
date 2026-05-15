@@ -10,7 +10,6 @@ from django.conf import settings
 from documents.exceptions import DocumentNotFoundError
 from documents.selectors import document_exists_for_user
 from qa.exceptions import DocumentRetrievalError, EmbeddingGenerationError
-from qa.models import QuestionActivity
 from .activity import IncrementQuestionCountService, QuestionActivityCreateService
 from .embedding import get_query_embedding
 from .retrieval import retrieve_documents

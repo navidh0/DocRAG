@@ -9,7 +9,6 @@ from django.db import connection, transaction
 from django.db import ProgrammingError
 
 from documents.models import Document
-from documents.exceptions import DocumentServicesError
 from documents.selectors import document_get
 
 if TYPE_CHECKING:

@@ -30,9 +30,6 @@ def get_query_embedding(question: str) -> list[float]:
     Returns the embedding vector for `question`.
     Checks Redis first; falls back to Ollama on miss or cache failure.
     TTL: 24 h.
-
-    Note: cache key does not include the model name. If OLLAMA_EMBED_MODEL
-    changes, flush the embedding:* keyspace manually or wait for TTL expiry.
     """
     redis_client = _get_redis_client()
     cache_key = _cache_key(question, settings.OLLAMA_EMBED_MODEL)

@@ -3,8 +3,8 @@ from __future__ import annotations
 import logging
 
 from rest_framework_simplejwt.tokens import RefreshToken
-
-from ..exceptions import (
+from rest_framework_simplejwt.exceptions import TokenError
+from accounts.exceptions import (
     InvalidTokenError,
     MissingRefreshTokenError,
     UserAlreadyExistsError,
@@ -52,5 +52,5 @@ def logout_user(*, refresh_token: str | None) -> None:
         token = RefreshToken(refresh_token)  # type: ignore[arg-type]
         token.blacklist()
         logger.info("Refresh token blacklisted.")
-    except Exception:
+    except TokenError:
         raise InvalidTokenError()

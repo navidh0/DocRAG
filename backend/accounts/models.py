@@ -11,9 +11,6 @@ class User(AbstractUser):
     """
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-
-    # Denormalised counter — faster than COUNT(*) on QALog for every /me/stats/ call.
-    # Incremented atomically via F() expression in the QA pipeline.
     question_count = models.PositiveIntegerField(default=0)
 
     created_at = models.DateTimeField(auto_now_add=True)

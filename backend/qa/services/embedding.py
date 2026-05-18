@@ -1,0 +1,63 @@
+from __future__ import annotations
+
+import hashlib
+import json
+import logging
+
+import ollama
+import redis
+from django.conf import settings
+from qa.exceptions import OllamaUnavailableError
+
+logger = logging.getLogger(__name__)
+
+
+def _get_redis_client():
+    try:
+        return redis.from_url(settings.CELERY_BROKER_URL, decode_responses=True)
+    except Exception as exc:
+        logger.warning("[embedding] Redis init failed, cache disabled. Error: %s", exc)
+        return None
+
+
+def _cache_key(text: str, model: str) -> str:
+    payload = f"{model}:{text}"
+    return f"embedding:{hashlib.md5(payload.encode()).hexdigest()}"
+
+
+def get_query_embedding(question: str) -> list[float]:
+    """
+    Returns the embedding vector for `question`.
+    Checks Redis first; falls back to Ollama on miss or cache failure.
+    TTL: 24 h.
+    """
+    redis_client = _get_redis_client()
+    cache_key = _cache_key(question, settings.OLLAMA_EMBED_MODEL)
+
+    if redis_client:
+        try:
+            cached = redis_client.get(cache_key)
+            if cached:
+                return json.loads(cached)
+        except Exception as exc:
+            logger.warning("[embedding] Redis read failed: %s", exc)
+
+    try:
+        client = ollama.Client(host=settings.OLLAMA_BASE_URL, timeout=settings.OLLAMA_TIMEOUT)
+        embedding = client.embed(
+            model=settings.OLLAMA_EMBED_MODEL,
+            input=question,
+        )["embeddings"][0]
+    except Exception as exc:
+        raise OllamaUnavailableError(
+            "Ollama service is unreachable. Ensure Ollama is running.",
+            details={"error": str(exc)},
+        ) from exc
+
+    if redis_client:
+        try:
+            redis_client.setex(cache_key, 86400, json.dumps(embedding))
+        except Exception as exc:
+            logger.warning("[embedding] Redis write failed: %s", exc)
+
+    return embedding

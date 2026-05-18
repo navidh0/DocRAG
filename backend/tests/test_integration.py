@@ -1,5 +1,3 @@
-# tests/test_integration.py
-
 import pytest
 import uuid
 from rest_framework import status
@@ -7,7 +5,7 @@ from rest_framework.test import APIClient
 from io import BytesIO
 from unittest.mock import patch, MagicMock
 from django.contrib.auth import get_user_model
-from langchain_core.documents import Document
+from contextlib import contextmanager
 
 pytestmark = pytest.mark.django_db
 User = get_user_model()
@@ -23,46 +21,68 @@ def generate_unique_username(base="user"):
     return f"{base}_{uuid.uuid4().hex[:8]}"
 
 
+@contextmanager
 def mock_qa_dependencies():
     """
-    Returns a context manager stack that mocks all external dependencies
-    in the QA view: ollama.Client, PGVector, and rerank_with_gemma4.
+    Patches at the correct import sites after the services/ refactor.
+
+    Module map:
+      embedding generation  → qa.services.embedding.ollama
+      answer generation     → qa.services.process.ollama
+      vector retrieval      → qa.services.retrieval.PGVector
+                            → qa.services.retrieval.get_vector_store_connection
+      reranking             → qa.services.process.HybridReranker
+      redis cache           → qa.services.embedding.redis  (silenced)
+      side effects          → qa.services.activity.IncrementQuestionCountService.execute
     """
-    import contextlib
+    mock_doc = MagicMock()
+    mock_doc.page_content = "Relevant content about the topic."
+    mock_doc.metadata = {
+        "file_name": "test.pdf",
+        "page": 0,
+        "chunk_index": 0,
+        "document_id": "test-doc-id",
+        "user_id": "test-user-id",
+    }
 
-    fake_doc = Document(
-        page_content="Machine learning is a subset of AI.",
-        metadata={
-            "user_id": "1",
-            "document_id": "test-doc",
-            "file_name": "test.txt",
-            "page": 1,
-            "chunk_index": 0,
+    with patch("qa.services.embedding.redis") as mock_redis_module, \
+         patch("qa.services.embedding.ollama") as mock_embed_ollama, \
+         patch("qa.services.process.ollama") as mock_process_ollama, \
+         patch("qa.services.retrieval.PGVector") as mock_pgvector_cls, \
+         patch("qa.services.retrieval.get_vector_store_connection") as mock_conn, \
+         patch("qa.services.process.HybridReranker") as mock_reranker_cls, \
+         patch("qa.services.activity.IncrementQuestionCountService.execute"):
+
+        # Silence Redis — return None so embedding falls back to Ollama directly
+        mock_redis_module.from_url.return_value = None
+
+        # Embedding Ollama
+        mock_embed_client = MagicMock()
+        mock_embed_ollama.Client.return_value = mock_embed_client
+        mock_embed_client.embed.return_value = {"embeddings": [[0.1] * 384]}
+
+        # Generation Ollama
+        mock_process_client = MagicMock()
+        mock_process_ollama.Client.return_value = mock_process_client
+        mock_process_client.generate.return_value = {"response": "The answer is 42."}
+
+        # PGVector
+        mock_store = MagicMock()
+        mock_pgvector_cls.return_value = mock_store
+        mock_store.similarity_search_by_vector.return_value = [mock_doc]
+        mock_conn.return_value = "postgresql+psycopg://test"
+
+        # HybridReranker
+        mock_reranker = MagicMock()
+        mock_reranker_cls.return_value = mock_reranker
+        mock_reranker.rerank.return_value = [mock_doc]
+
+        yield {
+            "embed_ollama": mock_embed_client,
+            "process_ollama": mock_process_client,
+            "store": mock_store,
+            "reranker": mock_reranker,
         }
-    )
-
-    @contextlib.contextmanager
-    def _stack():
-        with patch('ollama.Client') as mock_client_class, \
-             patch('qa.views.PGVector') as mock_pgvector_class, \
-             patch('qa.views.rerank_with_gemma4') as mock_rerank:
-
-            # Mock ollama
-            mock_ollama = mock_client_class.return_value
-            mock_ollama.embed.return_value = {'embeddings': [[0.1] * 768]}
-            mock_ollama.generate.return_value = {'response': 'Mocked answer'}
-
-            # Mock PGVector store
-            mock_store = mock_pgvector_class.return_value
-            mock_store.similarity_search_by_vector.return_value = [fake_doc]
-
-            # Mock reranker — just return the docs as-is
-            mock_rerank.return_value = [fake_doc]
-
-            yield mock_ollama
-
-    return _stack()
-
 
 @pytest.mark.integration
 class TestEndToEndWorkflow:
@@ -84,7 +104,7 @@ class TestEndToEndWorkflow:
                     {'question': q, 'document_id': doc_id},
                     format='json'
                 )
-                assert resp.status_code == status.HTTP_200_OK, \
+                assert resp.status_code == status.HTTP_202_ACCEPTED, \
                     f"QA ask failed for '{q}': {resp.data}"
 
         history_resp = client.get('/api/qa/activity/')
@@ -133,7 +153,7 @@ class TestConcurrentOperations:
                     {'question': f'Rapid question {i}?', 'document_id': doc_id},
                     format='json'
                 )
-                assert resp.status_code == status.HTTP_200_OK, \
+                assert resp.status_code == status.HTTP_202_ACCEPTED, \
                     f"QA ask failed for question {i}: {resp.data}"
 
         activity_resp = client.get('/api/qa/activity/')
@@ -173,7 +193,7 @@ class TestDataPersistence:
                 {'question': 'Persistent question?', 'document_id': doc_id},
                 format='json'
             )
-            assert resp.status_code == status.HTTP_200_OK, \
+            assert resp.status_code == status.HTTP_202_ACCEPTED, \
                 f"QA ask failed: {resp.data}"
 
         # Simulate new session with fresh token

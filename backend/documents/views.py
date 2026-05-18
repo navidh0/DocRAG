@@ -1,128 +1,239 @@
-import ollama
-import os
-from rest_framework import generics, filters, status
+from __future__ import annotations
+
+from typing import Any, cast
+from uuid import UUID
+
+from rest_framework import status
 from rest_framework.views import APIView
+from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from django.db import transaction
-from django_filters.rest_framework import DjangoFilterBackend
-from langchain_postgres import PGVector
-from .models import Document
-from .serializers import DocumentSerializer
-from .tasks import process_document_embedding
-from .utils import get_vector_store_connection
+from rest_framework.parsers import MultiPartParser, FormParser
+from rest_framework.pagination import PageNumberPagination
 
-class DocumentListCreateView(generics.ListCreateAPIView):
-    serializer_class = DocumentSerializer
+from drf_spectacular.utils import (
+    extend_schema,
+    OpenApiParameter,
+    OpenApiResponse,
+)
+from drf_spectacular.types import OpenApiTypes
+
+from .serializers import (
+    DocumentListFilterSerializer,
+    DocumentOutputSerializer,
+    DocumentStatusOutputSerializer,
+    DocumentStatusWithChunksOutputSerializer,
+    DocumentUploadInputSerializer,
+    STATUS_CHOICES,
+    FILE_TYPE_CHOICES,
+)
+from .services import (
+    CreateDocumentService,
+    GetDocumentStatusService,
+    DeleteDocumentService,
+    DocumentChunksService,
+)
+from .selectors import document_list, document_get
+
+
+class DocumentListCreateView(APIView):
+    parser_classes = [MultiPartParser, FormParser]
     permission_classes = [IsAuthenticated]
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['file_type', 'status']
-    search_fields = ['file_name']
-    ordering_fields = ['created_at', 'file_name']
-    ordering = ['-created_at']
 
-    def get_queryset(self):
-        # Strictly isolate data to the authenticated user
-        return Document.objects.filter(user=self.request.user)
+    @extend_schema(
+        summary="List uploaded documents",
+        description=(
+            "Returns a paginated list of documents uploaded by the authenticated user, "
+            "ordered by upload date descending."
+        ),
+        parameters=[
+            OpenApiParameter(
+                name="search",
+                type=OpenApiTypes.STR,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                description="Case-insensitive partial match against file name.",
+            ),
+            OpenApiParameter(
+                name="file_type",
+                type=OpenApiTypes.STR,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                enum=FILE_TYPE_CHOICES,
+                description="Filter by exact file type.",
+            ),
+            OpenApiParameter(
+                name="status",
+                type=OpenApiTypes.STR,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                enum=STATUS_CHOICES,
+                description="Filter by processing status.",
+            ),
+        ],
+        responses={
+            200: DocumentOutputSerializer(many=True),
+        },
+    )
+    def get(self, request: Request) -> Response:
+        filter_ser = DocumentListFilterSerializer(data=request.query_params)
+        filter_ser.is_valid(raise_exception=True)
 
-    def perform_create(self, serializer):
-        # Assign user and save
-        doc = serializer.save(user=self.request.user)
-        
-        # Trigger Celery task using the UUID string
-        try:
-            transaction.on_commit(lambda: process_document_embedding.delay(str(doc.id)))
-        except Exception as e:
-            print(f"[ERROR] Failed to queue embedding task for {doc.id}: {e}")
+        documents = document_list(
+            user=request.user,
+            filters=filter_ser.validated_data, #type: ignore
+        )
 
+        paginator = PageNumberPagination()
+        paginated_qs = paginator.paginate_queryset(documents, request, view=self)
+        output = DocumentOutputSerializer(paginated_qs, many=True)
 
-class DocumentRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
-    serializer_class = DocumentSerializer
-    permission_classes = [IsAuthenticated]
-    lookup_field = 'id'
+        return Response(
+            paginator.get_paginated_response(output.data).data,
+            status=status.HTTP_200_OK,
+        )
 
-    def get_queryset(self):
-        return Document.objects.filter(user=self.request.user)
-
-    def destroy(self, request, *args, **kwargs):
-        """Override to provide a response body on deletion."""
-        instance = self.get_object()
-        doc_id = instance.id
-        file_name = instance.file_name
-        
-        self.perform_destroy(instance)
-        
-        return Response({
-            "message": "Document deleted successfully",
-            "details": {
-                "id": str(doc_id),
-                "file_name": file_name
+    @extend_schema(
+        summary="Upload a document",
+        description=(
+            "Upload a document to be asynchronously processed and indexed for Q&A retrieval. "
+            "After upload, the document enters `pending` status. "
+            "Poll `GET /documents/{id}/status/` to track progress through "
+            "`processing` → `completed` (or `failed`). "
+            "Supported formats: **PDF, XLSX, XLS, TXT, CSV**."
+        ),
+        request={
+            "multipart/form-data": {
+                "type": "object",
+                "properties": {
+                    "file": {
+                        "type": "string",
+                        "format": "binary",
+                        "description": "The document file to upload.",
+                    }
+                },
+                "required": ["file"],
             }
-        }, status=status.HTTP_200_OK)
+        },
+        responses={
+            201: DocumentOutputSerializer,
+            400: OpenApiResponse(
+                description=(
+                    "Validation error — file missing or extension not in the allowed set "
+                    "(pdf, xlsx, xls, txt, csv)."
+                )
+            ),
+        },
+    )
+    def post(self, request: Request) -> Response:
+        input_ser = DocumentUploadInputSerializer(data=request.data)
+        input_ser.is_valid(raise_exception=True)
+
+        doc = CreateDocumentService.execute(
+            user=request.user,
+            validated_data=cast(dict[str, Any], input_ser.validated_data),
+        )
+
+        return Response(DocumentOutputSerializer(doc).data, status=status.HTTP_201_CREATED)
+
+
+class DocumentRetrieveDestroyView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        summary="Retrieve document",
+        description=(
+            "Returns core metadata for a single document: "
+            "ID, file name, file type, processing status, and upload timestamp. "
+            "Use `GET /documents/{id}/status/` for full processing detail and optional chunk inspection."
+        ),
+        responses={
+            200: DocumentOutputSerializer,
+            404: OpenApiResponse(
+                description="Document not found or does not belong to the authenticated user."
+            ),
+        },
+    )
+    def get(self, request: Request, id: UUID) -> Response:
+        doc = document_get(user=request.user, document_id=id)
+        return Response(DocumentOutputSerializer(doc).data, status=status.HTTP_200_OK)
+
+    @extend_schema(
+        summary="Delete a document",
+        description=(
+            "Permanently deletes the document and all associated vector embeddings. "
+            "**This action is irreversible.** "
+            "Returns the ID and file name of the deleted document for confirmation."
+        ),
+        responses={
+            200: OpenApiResponse(
+                description="Document deleted. Body: `{message, details: {id, file_name}}`."
+            ),
+            404: OpenApiResponse(
+                description="Document not found or does not belong to the authenticated user."
+            ),
+        },
+    )
+    def delete(self, request: Request, id: UUID) -> Response:
+        data = DeleteDocumentService.execute(user=request.user, document_id=id)
+        return Response(
+            {"message": "Document deleted successfully", "details": data},
+            status=status.HTTP_200_OK,
+        )
 
 
 class DocumentStatusView(APIView):
     permission_classes = [IsAuthenticated]
-    
-    def get(self, request, id):
-        try:
-            doc = Document.objects.get(id=id, user=request.user)
-            return Response({
-                "id": str(doc.id),
-                "file_name": doc.file_name,
-                "status": doc.status,
-                "created_at": doc.created_at.isoformat(),
-                "status_description": self.get_status_description(doc.status)
-            }, status=status.HTTP_200_OK)
-        except Document.DoesNotExist:
-            return Response({"error": "Document not found"}, status=status.HTTP_404_NOT_FOUND)
-    
-    @staticmethod
-    def get_status_description(doc_status):
-        descriptions = {
-            'pending': 'Waiting to be processed',
-            'processing': 'Extracting text and generating embeddings...',
-            'completed': 'Ready for Q&A',
-            'failed': 'Processing failed. Check file format or logs.',
-        }
-        return descriptions.get(doc_status, 'Unknown status')
 
+    @extend_schema(
+        summary="Get document processing status",
+        description=(
+            "Returns full processing detail for a document: status, human-readable "
+            "description, and upload timestamp.\n\n"
+            "**Chunk inspection** — pass `?include_chunks=true` to append a preview of every "
+            "vector chunk indexed for this document (first 150 chars of content + typed metadata). "
+            "The fields `total_chunks` and `chunks` are only present in the response when this "
+            "flag is `true`. Intended for development and debugging; avoid in hot paths."
+        ),
+        parameters=[
+            OpenApiParameter(
+                name="include_chunks",
+                type=OpenApiTypes.BOOL,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                default=False,
+                description=(
+                    "When `true`, response includes `total_chunks` (int) and "
+                    "`chunks` (list of `{content, metadata}`). Omitted when `false` (default)."
+                ),
+            ),
+        ],
+        responses={
+            200: DocumentStatusWithChunksOutputSerializer,
+            404: OpenApiResponse(
+                description="Document not found or does not belong to the authenticated user."
+            ),
+        },
+    )
+    def get(self, request: Request, id: UUID) -> Response:
+        data = GetDocumentStatusService.execute(
+            user=request.user,
+            document_id=id,
+        )
 
-class DocumentChunksDebugView(APIView):
-    """Utility to verify chunks exist in the vector database"""
-    permission_classes = [IsAuthenticated]
+        include_chunks = (
+            request.query_params.get("include_chunks", "false").lower() == "true"
+        )
 
-    def get(self, request, id):
-        connection = get_vector_store_connection()
-        
-        try:
-            store = PGVector(
-                collection_name="rag_collection",
-                connection=connection,
-                embeddings=None, 
-                use_jsonb=True,
+        if include_chunks:
+            chunks_data = DocumentChunksService.execute(
+                user=request.user,
+                document_id=id,
             )
+            data["total_chunks"] = chunks_data["total_chunks_found"]
+            data["chunks"] = chunks_data["chunks"]
+            serializer = DocumentStatusWithChunksOutputSerializer(data)
+        else:
+            serializer = DocumentStatusOutputSerializer(data)
 
-            # Generate a dummy query embedding to retrieve chunks
-            client = ollama.Client(host=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"))
-            dummy_query = "document"
-            q_emb_resp = client.embed(
-                model=os.getenv("EMBEDDING_MODEL", "embeddinggemma"),
-                input=dummy_query
-            )
-            query_vector = q_emb_resp['embeddings'][0]
-
-            # Query chunks by metadata and vector similarity
-            chunks = store.similarity_search_by_vector(
-                embedding=query_vector, 
-                k=100, 
-                filter={"document_id": str(id), "user_id": str(request.user.id)}
-            )
-
-            return Response({
-                "document_id": id,
-                "total_chunks_found": len(chunks),
-                "chunks": [{"content": c.page_content[:150], "metadata": c.metadata} for c in chunks]
-            })
-        except Exception as e:
-            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response(serializer.data, status=status.HTTP_200_OK)

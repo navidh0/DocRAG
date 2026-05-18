@@ -1,20 +1,39 @@
+x-backend-common: &backend-common
+  build: ./backend
+  env_file:
+    - .env
+  environment:
+    DJANGO_SETTINGS_MODULE: core.settings.local
+  volumes:
+    - ./backend:/app
+    - media_volume:/app/media
+  depends_on:
+    db:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+  restart: unless-stopped
+
 services:
   db:
     image: pgvector/pgvector:pg16
     container_name: rag_postgres
     environment:
-      POSTGRES_DB: ragdb
-      POSTGRES_USER: raguser
-      POSTGRES_PASSWORD: ragpassword
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U raguser -d ragdb"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 5
+    restart: unless-stopped
 
   redis:
     image: redis:7-alpine
@@ -26,73 +45,33 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    restart: unless-stopped
 
   web:
-    build: ./backend
+    <<: *backend-common
     container_name: rag_web
     command: >
-      sh -c "python manage.py collectstatic --noinput &&
-             python manage.py migrate &&
-             python manage.py runserver 0.0.0.0:8000"
-    volumes:
+      sh -c "python manage.py migrate &&
+            python manage.py collectstatic --noinput &&
+            gunicorn core.wsgi:application --bind 0.0.0.0:8000 --workers 2 --timeout 30"
+        volumes:
       - ./backend:/app
       - static_volume:/app/staticfiles
+      - media_volume:/app/media
     ports:
       - "8000:8000"
-    environment:
-      - DEBUG=True
-      - DATABASE_URL=postgresql://raguser:ragpassword@db:5432/ragdb
-      - REDIS_URL=redis://redis:6379/0
-    env_file:
-      - .env
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
 
   celery:
-    build: ./backend
+    <<: *backend-common
     container_name: rag_celery
     command: celery -A core worker -l info --concurrency=2 -Q celery,documents,qa
-    volumes:
-      - ./backend:/app
-    environment:
-      - DEBUG=False
-      - DATABASE_URL=postgresql://raguser:ragpassword@db:5432/ragdb
-      - REDIS_URL=redis://redis:6379/0
-    env_file:
-      - .env
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
 
   celery-beat:
-    build: ./backend
+    <<: *backend-common
     container_name: rag_celery_beat
     command: celery -A core beat -l info --scheduler django_celery_beat.schedulers:DatabaseScheduler
-    volumes:
-      - ./backend:/app
-    environment:
-      - DEBUG=False
-      - DATABASE_URL=postgresql://raguser:ragpassword@db:5432/ragdb
-      - REDIS_URL=redis://redis:6379/0
-    env_file:
-      - .env
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
 
 volumes:
   postgres_data:
   static_volume:
+  media_volume:

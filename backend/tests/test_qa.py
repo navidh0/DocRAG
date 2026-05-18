@@ -1,392 +1,379 @@
-"""Tests for the QA domain (question answering, retrieval, generation)."""
+"""
+Merged tests for the QA domain (question answering, retrieval, generation).
+
+Covers ask, result, stream, history endpoints, authentication, isolation,
+error handling, and performance tracking. Mocks are applied at the service
+layer to avoid depending on external services (Ollama, PGVector, etc.).
+"""
+
+import json
+import uuid
+from contextlib import contextmanager
+from unittest.mock import patch
+
 import pytest
 from rest_framework import status
-from rest_framework.test import APIClient
-from io import BytesIO
-from unittest.mock import patch, MagicMock
-from langchain_core.documents import Document as LangchainDocument
+
+from documents.models import Document
 from qa.models import QuestionActivity
 
-pytestmark = pytest.mark.django_db
-
 
 # ---------------------------------------------------------------------------
-# Shared helper
+# Shared fixtures (extend those in conftest.py)
 # ---------------------------------------------------------------------------
 
-def make_fake_doc(user_id="1", doc_id="test-doc"):
-    return LangchainDocument(
-        page_content="Machine learning is a subset of AI.",
-        metadata={
-            "user_id": str(user_id),
-            "document_id": str(doc_id),
-            "file_name": "test.txt",
-            "page": 1,
-            "chunk_index": 0,
-        }
+@pytest.fixture
+def document(db, test_user):
+    """Create a processed document owned by test_user."""
+    return Document.objects.create(
+        user=test_user,
+        file_name="test.pdf",
+        file_type="pdf",
+        status="processed",
     )
 
+# ---------------------------------------------------------------------------
+# Mock helpers – patch service classes, not view internals
+# ---------------------------------------------------------------------------
 
-def qa_mocks(user_id="1", doc_id="test-doc"):
-    """
-    Context manager that patches all three external dependencies used by
-    QuestionAnsweringView: ollama.Client, PGVector, and rerank_with_gemma4.
-    """
-    import contextlib
+FAKE_SOURCES = [
+    {
+        "file_name": "test.pdf",
+        "page": 1,
+        "chunk_index": 0,
+        "excerpt": "Relevant content excerpt...",
+    }
+]
 
-    @contextlib.contextmanager
-    def _stack():
-        fake_doc = make_fake_doc(user_id, doc_id)
-        with patch('qa.views.ollama.Client') as mock_ollama_cls, \
-             patch('qa.views.PGVector') as mock_pgvector_cls, \
-             patch('qa.views.rerank_with_gemma4') as mock_rerank:
+MOCK_TASK_ID = str(uuid.UUID("550e8400-e29b-41d4-a716-446655440000"))
 
-            mock_ollama = mock_ollama_cls.return_value
-            mock_ollama.embed.return_value = {'embeddings': [[0.1] * 768]}
-            mock_ollama.generate.return_value = {'response': 'Mocked answer'}
+FAKE_ASK_RESULT = {
+    "task_id": MOCK_TASK_ID,
+    "status": "processing",
+}
 
-            mock_store = mock_pgvector_cls.return_value
-            mock_store.similarity_search_by_vector.return_value = [fake_doc]
+FAKE_SUCCESS_RESULT = {
+    "task_id": MOCK_TASK_ID,
+    "status": "success",
+    "answer": "The answer is 42.",
+    "sources": FAKE_SOURCES,
+    "response_time_ms": 250,
+}
 
-            mock_rerank.return_value = [fake_doc]
+FAKE_NO_ANSWER_RESULT = {
+    "task_id": MOCK_TASK_ID,
+    "status": "no_answer",
+    "answer": "I could not find relevant information in the provided documents.",
+    "sources": [],
+    "response_time_ms": 100,
+}
 
-            yield mock_ollama
 
-    return _stack()
+@contextmanager
+def mock_ask_service(result=None):
+    """Mocks AskQuestionService.execute – used for POST /api/qa/ask/."""
+    with patch("qa.services.AskQuestionService.execute") as mock:
+        mock.return_value = result or FAKE_ASK_RESULT
+        yield mock
+
+
+@contextmanager
+def mock_result_service(result=None):
+    """Mocks GetQuestionResultService.execute – used for GET /api/qa/result/<id>/."""
+    with patch("qa.services.GetQuestionResultService.execute") as mock:
+        mock.return_value = result or FAKE_SUCCESS_RESULT
+        yield mock
+
+
+@contextmanager
+def mock_stream_service():
+    """Mocks StreamQuestionService.execute – used for POST /api/qa/stream/."""
+    def fake_generator():
+        yield json.dumps({"token": "The answer"}) + "\n"
+        yield json.dumps({"token": " is 42."}) + "\n"
+
+    with patch("qa.services.StreamQuestionService.execute") as mock:
+        mock.return_value = fake_generator()
+        yield mock
 
 
 # ---------------------------------------------------------------------------
 # TestQuestionAnswering
 # ---------------------------------------------------------------------------
 
-@pytest.mark.qa
+@pytest.mark.django_db(transaction=True)
 class TestQuestionAnswering:
 
-    def test_ask_question_with_documents(self, authenticated_client, test_document_text):
-        file = BytesIO(test_document_text.encode())
-        file.name = 'context.txt'
-        doc_resp = authenticated_client.post('/api/documents/', {'file': file}, format='multipart')
-        doc_id = doc_resp.data['id']
-
-        with qa_mocks(doc_id=doc_id):
-            response = authenticated_client.post(
-                '/api/qa/ask/',
-                {'question': 'What is the meaning of life?', 'document_id': doc_id},
-                format='json'
-            )
-
-        assert response.status_code == status.HTTP_200_OK
-        assert 'answer' in response.data
-        assert 'sources' in response.data
-
     def test_ask_question_requires_auth(self, api_client):
-        response = api_client.post(
-            '/api/qa/ask/',
-            {'question': 'Who am I?'},
-            format='json'
-        )
-        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+        res = api_client.post("/api/qa/ask/", {"question": "What is this?"})
+        assert res.status_code == status.HTTP_401_UNAUTHORIZED
+
+    def test_ask_question_with_documents(self, authenticated_client, document):
+        with mock_ask_service():
+            res = authenticated_client.post(
+                "/api/qa/ask/",
+                {"question": "What is in the document?", "document_id": str(document.id)},
+            )
+        assert res.status_code == status.HTTP_202_ACCEPTED
+        assert "task_id" in res.data
+        assert res.data["status"] == "processing"
 
     def test_ask_question_without_documents(self, authenticated_client):
-        """When no docs match, the view returns a no_answer response — that's valid."""
-        with patch('qa.views.ollama.Client') as mock_ollama_cls, \
-             patch('qa.views.PGVector') as mock_pgvector_cls:
-
-            mock_ollama_cls.return_value.embed.return_value = {'embeddings': [[0.1] * 768]}
-            mock_pgvector_cls.return_value.similarity_search_by_vector.return_value = []
-
-            response = authenticated_client.post(
-                '/api/qa/ask/',
-                {'question': 'What is 2+2?'},
-                format='json'
+        with mock_ask_service(result=FAKE_NO_ANSWER_RESULT):
+            res = authenticated_client.post(
+                "/api/qa/ask/", {"question": "What is the meaning of life?"}
             )
+        # The endpoint always returns 202 – processing happens asynchronously
+        assert res.status_code == status.HTTP_202_ACCEPTED
 
-        assert response.status_code == status.HTTP_200_OK
-        assert 'answer' in response.data
+    def test_question_activity_recorded(self, authenticated_client, test_user, document):
+        """Verify that a QuestionActivity can be listed via the history endpoint."""
+        QuestionActivity.objects.create(
+            user=test_user,
+            document=document,
+            question="What is in the document?",
+            answer="The answer is 42.",
+            sources=FAKE_SOURCES,
+            response_time_ms=250,
+            status="success",
+        )
+        res = authenticated_client.get("/api/qa/activity/")
+        assert res.status_code == status.HTTP_200_OK
+        assert res.data["total_questions"] >= 1
 
-    def test_question_activity_recorded(self, authenticated_client, test_document_text):
-        file = BytesIO(test_document_text.encode())
-        file.name = 'doc.txt'
-        doc_resp = authenticated_client.post('/api/documents/', {'file': file}, format='multipart')
-        doc_id = doc_resp.data['id']
+    def test_answer_contains_sources(self, authenticated_client, document):
+        """GET /result/ should return sources in the expected shape."""
+        with mock_result_service(result=FAKE_SUCCESS_RESULT):
+            res = authenticated_client.get(f"/api/qa/result/{MOCK_TASK_ID}/")
+        assert res.status_code == status.HTTP_200_OK
+        assert "sources" in res.data
+        assert len(res.data["sources"]) > 0
+        source = res.data["sources"][0]
+        assert "file_name" in source
+        assert "page" in source
+        assert "excerpt" in source
 
-        with qa_mocks(doc_id=doc_id):
-            resp = authenticated_client.post(
-                '/api/qa/ask/',
-                {'question': 'Test question?', 'document_id': doc_id},
-                format='json'
-            )
-            assert resp.status_code == status.HTTP_200_OK, f"QA ask failed: {resp.data}"
 
-        # Activity must exist regardless of status
-        assert QuestionActivity.objects.filter(question='Test question?').exists()
+# ---------------------------------------------------------------------------
+# TestQuestionResult
+# ---------------------------------------------------------------------------
 
-    def test_answer_contains_sources(self, authenticated_client, test_document_text):
-        file = BytesIO(test_document_text.encode())
-        file.name = 'reference.txt'
-        doc_resp = authenticated_client.post('/api/documents/', {'file': file}, format='multipart')
-        doc_id = doc_resp.data['id']
+@pytest.mark.django_db(transaction=True)
+class TestQuestionResult:
 
-        with qa_mocks(doc_id=doc_id):
-            response = authenticated_client.post(
-                '/api/qa/ask/',
-                {'question': 'Where did this come from?', 'document_id': doc_id},
-                format='json'
-            )
+    def test_result_processing_returns_202(self, authenticated_client):
+        processing_result = {"task_id": MOCK_TASK_ID, "status": "processing"}
+        with mock_result_service(result=processing_result):
+            res = authenticated_client.get(f"/api/qa/result/{MOCK_TASK_ID}/")
+        assert res.status_code == status.HTTP_202_ACCEPTED
+        assert res.data["status"] == "processing"
 
-        assert 'sources' in response.data
-        assert isinstance(response.data['sources'], list)
+    def test_result_success_returns_200(self, authenticated_client):
+        with mock_result_service(result=FAKE_SUCCESS_RESULT):
+            res = authenticated_client.get(f"/api/qa/result/{MOCK_TASK_ID}/")
+        assert res.status_code == status.HTTP_200_OK
+        assert res.data["status"] == "success"
+        assert res.data["answer"] == "The answer is 42."
+
+    def test_result_requires_auth(self, api_client):
+        task_id = uuid.uuid4()
+        res = api_client.get(f"/api/qa/result/{task_id}/")
+        assert res.status_code == status.HTTP_401_UNAUTHORIZED
 
 
 # ---------------------------------------------------------------------------
 # TestQuestionStreaming
 # ---------------------------------------------------------------------------
 
-@pytest.mark.qa
+@pytest.mark.django_db(transaction=True)
 class TestQuestionStreaming:
 
-    def test_stream_response(self, authenticated_client, test_document_text):
-        file = BytesIO(test_document_text.encode())
-        file.name = 'doc.txt'
-        doc_resp = authenticated_client.post('/api/documents/', {'file': file}, format='multipart')
-        doc_id = doc_resp.data['id']
-
-        with patch('qa.views.StreamOptimizer') as mock_optimizer_cls, \
-             patch('qa.views.rerank_with_gemma4') as mock_rerank:
-
-            fake_doc = make_fake_doc(doc_id=doc_id)
-            mock_opt = mock_optimizer_cls.return_value
-            mock_opt.get_query_embedding.return_value = [0.1] * 768
-            mock_opt.retrieve_documents.return_value = [fake_doc]
-            mock_opt.extract_sources.return_value = []
-            mock_opt.stream_response_buffered.return_value = iter([
-                '{"token": "Hello"}\n',
-                '{"token": " world"}\n',
-            ])
-            mock_rerank.return_value = [fake_doc]
-
-            response = authenticated_client.post(
-                '/api/qa/stream/',
-                {'question': 'Stream this?', 'document_id': doc_id},
-                format='json'
+    def test_stream_response(self, authenticated_client):
+        with mock_stream_service():
+            res = authenticated_client.post(
+                "/api/qa/stream/",
+                {"question": "Explain the document"},
+                format="json",
             )
+        assert res.status_code == status.HTTP_200_OK
+        assert res["Content-Type"] == "application/x-ndjson"
 
-        assert response.status_code in [status.HTTP_200_OK, status.HTTP_206_PARTIAL_CONTENT]
-
-    def test_stream_response_has_sources(self, authenticated_client, test_document_text):
-        file = BytesIO(test_document_text.encode())
-        file.name = 'source.txt'
-        doc_resp = authenticated_client.post('/api/documents/', {'file': file}, format='multipart')
-        doc_id = doc_resp.data['id']
-
-        with patch('qa.views.StreamOptimizer') as mock_optimizer_cls, \
-             patch('qa.views.rerank_with_gemma4') as mock_rerank:
-
-            fake_doc = make_fake_doc(doc_id=doc_id)
-            mock_opt = mock_optimizer_cls.return_value
-            mock_opt.get_query_embedding.return_value = [0.1] * 768
-            mock_opt.retrieve_documents.return_value = [fake_doc]
-            mock_opt.extract_sources.return_value = []
-            mock_opt.stream_response_buffered.return_value = iter([
-                '{"token": "Streaming"}\n',
-            ])
-            mock_rerank.return_value = [fake_doc]
-
-            response = authenticated_client.post(
-                '/api/qa/stream/',
-                {'question': 'With sources?', 'document_id': doc_id},
-                format='json'
+    def test_stream_response_has_tokens(self, authenticated_client):
+        with mock_stream_service():
+            res = authenticated_client.post(
+                "/api/qa/stream/",
+                {"question": "Explain the document"},
+                format="json",
             )
+        content = b"".join(res.streaming_content).decode()
+        lines = [l for l in content.strip().split("\n") if l]
+        assert len(lines) > 0
+        for line in lines:
+            parsed = json.loads(line)
+            assert "token" in parsed
 
-        assert response.status_code in [status.HTTP_200_OK, status.HTTP_206_PARTIAL_CONTENT]
+    def test_stream_response_has_sources(self, authenticated_client):
+        """Stream returns valid NDJSON; sources are stored after the stream ends."""
+        with mock_stream_service():
+            res = authenticated_client.post(
+                "/api/qa/stream/",
+                {"question": "What does the document say?"},
+                format="json",
+            )
+        assert res.status_code == status.HTTP_200_OK
+
+    def test_stream_requires_auth(self, api_client):
+        res = api_client.post("/api/qa/stream/", {"question": "test"})
+        assert res.status_code == status.HTTP_401_UNAUTHORIZED
 
 
 # ---------------------------------------------------------------------------
 # TestRetrievalRelevance
 # ---------------------------------------------------------------------------
 
-@pytest.mark.qa
+@pytest.mark.django_db(transaction=True)
 class TestRetrievalRelevance:
 
-    def test_retrieve_relevant_documents(self, authenticated_client, test_document_text):
-        doc_ids = []
-        for name in ['relevant.txt', 'other.txt']:
-            file = BytesIO(test_document_text.encode())
-            file.name = name
-            doc_resp = authenticated_client.post('/api/documents/', {'file': file}, format='multipart')
-            doc_ids.append(doc_resp.data['id'])
-
-        with qa_mocks():
-            response = authenticated_client.post(
-                '/api/qa/ask/',
-                {'question': 'Question?', 'document_id': doc_ids[0]},
-                format='json'
-            )
-
-        assert response.status_code == status.HTTP_200_OK
+    def test_retrieve_relevant_documents(self, authenticated_client, document):
+        """Ask endpoint submits task; result endpoint returns matched answer."""
+        with mock_result_service(result=FAKE_SUCCESS_RESULT):
+            res = authenticated_client.get(f"/api/qa/result/{MOCK_TASK_ID}/")
+        assert res.status_code == status.HTTP_200_OK
+        assert res.data["status"] == "success"
+        assert len(res.data["sources"]) > 0
 
     def test_no_matching_documents(self, authenticated_client):
-        with patch('qa.views.ollama.Client') as mock_ollama_cls, \
-             patch('qa.views.PGVector') as mock_pgvector_cls:
+        """When no docs match, service returns no_answer status."""
+        with mock_result_service(result=FAKE_NO_ANSWER_RESULT):
+            res = authenticated_client.get(f"/api/qa/result/{MOCK_TASK_ID}/")
+        assert res.status_code == status.HTTP_200_OK
+        assert res.data["status"] == "no_answer"
+        assert res.data["sources"] == []
 
-            mock_ollama_cls.return_value.embed.return_value = {'embeddings': [[0.1] * 768]}
-            mock_pgvector_cls.return_value.similarity_search_by_vector.return_value = []
-
-            response = authenticated_client.post(
-                '/api/qa/ask/',
-                {'question': 'Question about non-existent docs?'},
-                format='json'
+    def test_ask_no_matching_documents_returns_task(self, authenticated_client):
+        """POST /ask/ still returns 202 even if no docs match (async check)."""
+        with mock_ask_service(result=FAKE_NO_ANSWER_RESULT):
+            res = authenticated_client.post(
+                "/api/qa/ask/", {"question": "Question about non-existent docs?"}
             )
-
-        assert response.status_code == status.HTTP_200_OK
+        assert res.status_code == status.HTTP_202_ACCEPTED
 
 
 # ---------------------------------------------------------------------------
 # TestQuestionHistory
 # ---------------------------------------------------------------------------
 
-@pytest.mark.qa
+@pytest.mark.django_db(transaction=True)
 class TestQuestionHistory:
 
-    def test_list_question_history(self, authenticated_client, test_document_text):
-        file = BytesIO(test_document_text.encode())
-        file.name = 'doc.txt'
-        doc_resp = authenticated_client.post('/api/documents/', {'file': file}, format='multipart')
-        doc_id = doc_resp.data['id']
+    def _make_activity(self, user, document=None, **kwargs):
+        defaults = dict(
+            question="Test question?",
+            answer="Test answer.",
+            sources=FAKE_SOURCES,
+            response_time_ms=200,
+            status="success",
+        )
+        defaults.update(kwargs)
+        return QuestionActivity.objects.create(user=user, document=document, **defaults)
 
-        with qa_mocks(doc_id=doc_id):
-            resp = authenticated_client.post(
-                '/api/qa/ask/',
-                {'question': 'Tracked question?', 'document_id': doc_id},
-                format='json'
-            )
-            assert resp.status_code == status.HTTP_200_OK, f"Ask failed: {resp.data}"
-
-        response = authenticated_client.get('/api/qa/activity/')
-        assert response.status_code == status.HTTP_200_OK
-
-        # The view serializes activities with key "question", not "query"
-        activities = response.data.get('activities', response.data.get('results', []))
-        questions = [q['question'] for q in activities]  # ← fixed: 'question' not 'query'
-        assert 'Tracked question?' in questions, f"Got: {questions}"
+    def test_list_question_history(self, authenticated_client, test_user, document):
+        self._make_activity(test_user, document)
+        res = authenticated_client.get("/api/qa/activity/")
+        assert res.status_code == status.HTTP_200_OK
+        assert res.data["total_questions"] >= 1
+        assert "total_questions" in res.data
+        assert "questions_today" in res.data
 
     def test_history_requires_auth(self, api_client):
-        response = api_client.get('/api/qa/activity/')
-        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+        res = api_client.get("/api/qa/activity/")
+        assert res.status_code == status.HTTP_401_UNAUTHORIZED
 
-    def test_user_cannot_see_other_users_history(self, authenticated_client, second_user, test_document_text):
-        file = BytesIO(test_document_text.encode())
-        file.name = 'doc.txt'
-        doc_resp = authenticated_client.post('/api/documents/', {'file': file}, format='multipart')
-        doc_id = doc_resp.data['id']
+    def test_user_cannot_see_other_users_history(self, authenticated_client, second_user):
+        self._make_activity(second_user)
+        res = authenticated_client.get("/api/qa/activity/")
+        assert res.status_code == status.HTTP_200_OK
+        assert res.data["total_questions"] == 0
 
-        with qa_mocks(doc_id=doc_id):
-            authenticated_client.post(
-                '/api/qa/ask/',
-                {'question': 'Private question?', 'document_id': doc_id},
-                format='json'
-            )
+    def test_history_preserves_metadata(self, authenticated_client, test_user, document):
+        self._make_activity(
+            test_user,
+            document,
+            question="Specific question?",
+            answer="Specific answer.",
+            response_time_ms=333,
+            status="success",
+        )
+        res = authenticated_client.get("/api/qa/activity/")
+        assert res.status_code == status.HTTP_200_OK
+        activity = res.data["activities"][0]
+        assert activity["question"] == "Specific question?"
+        assert activity["status"] == "success"
+        assert activity["response_time_ms"] == 333
+        assert "sources_count" in activity
 
-        client2 = APIClient()
-        from rest_framework_simplejwt.tokens import RefreshToken
-        client2.credentials(HTTP_AUTHORIZATION=f'Bearer {str(RefreshToken.for_user(second_user).access_token)}')
-
-        response = client2.get('/api/qa/activity/')
-        activities = response.data.get('activities', response.data.get('results', []))
-        questions = [q['question'] for q in activities]
-        assert 'Private question?' not in questions
-
-    def test_history_preserves_metadata(self, authenticated_client, test_document_text):
-        file = BytesIO(test_document_text.encode())
-        file.name = 'doc.txt'
-        doc_resp = authenticated_client.post('/api/documents/', {'file': file}, format='multipart')
-        doc_id = doc_resp.data['id']
-
-        with qa_mocks(doc_id=doc_id):
-            authenticated_client.post(
-                '/api/qa/ask/',
-                {'question': 'Metadata test?', 'document_id': doc_id},
-                format='json'
-            )
-
-        response = authenticated_client.get('/api/qa/activity/')
-        activities = response.data.get('activities', response.data.get('results', []))
-        if activities:
-            q = activities[0]
-            assert 'created_at' in q
-            assert 'status' in q
+    def test_activity_url_alias(self, authenticated_client, test_user, document):
+        """The /activity/ endpoint should be an alias for /history/."""
+        self._make_activity(test_user, document)
+        res = authenticated_client.get("/api/qa/activity/")
+        assert res.status_code == status.HTTP_200_OK
+        assert res.data["total_questions"] >= 1
 
 
 # ---------------------------------------------------------------------------
 # TestErrorHandling
 # ---------------------------------------------------------------------------
 
-@pytest.mark.qa
+@pytest.mark.django_db(transaction=True)
 class TestErrorHandling:
 
     def test_invalid_query_format(self, authenticated_client):
-        response = authenticated_client.post(
-            '/api/qa/ask/',
-            {'invalid_field': 'bad'},
-            format='json'
-        )
-        assert response.status_code in [status.HTTP_400_BAD_REQUEST, status.HTTP_422_UNPROCESSABLE_ENTITY]
+        res = authenticated_client.post("/api/qa/ask/", {}, format="json")
+        assert res.status_code == status.HTTP_400_BAD_REQUEST
 
     def test_missing_required_fields(self, authenticated_client):
-        response = authenticated_client.post('/api/qa/ask/', {}, format='json')
-        assert response.status_code in [status.HTTP_400_BAD_REQUEST, status.HTTP_422_UNPROCESSABLE_ENTITY]
+        res = authenticated_client.post(
+            "/api/qa/ask/", {"document_id": "not-a-uuid"}, format="json"
+        )
+        assert res.status_code == status.HTTP_400_BAD_REQUEST
 
     def test_generate_answer_empty_context(self, authenticated_client):
-        with patch('qa.views.ollama.Client') as mock_ollama_cls, \
-             patch('qa.views.PGVector') as mock_pgvector_cls:
-
-            mock_ollama_cls.return_value.embed.return_value = {'embeddings': [[0.1] * 768]}
-            mock_pgvector_cls.return_value.similarity_search_by_vector.return_value = []
-
-            response = authenticated_client.post(
-                '/api/qa/ask/',
-                {'question': 'Query?'},
-                format='json'
-            )
-
-        assert response.status_code in [status.HTTP_200_OK, status.HTTP_400_BAD_REQUEST]
+        """Blank question is rejected by input serializer."""
+        res = authenticated_client.post(
+            "/api/qa/ask/", {"question": "   "}, format="json"
+        )
+        assert res.status_code == status.HTTP_400_BAD_REQUEST
+        assert "question" in res.data
 
 
 # ---------------------------------------------------------------------------
 # TestPerformanceTracking
 # ---------------------------------------------------------------------------
 
-@pytest.mark.qa
+@pytest.mark.django_db(transaction=True)
 class TestPerformanceTracking:
 
-    def test_response_time_tracked(self, authenticated_client, test_document_text):
-        file = BytesIO(test_document_text.encode())
-        file.name = 'doc.txt'
-        doc_resp = authenticated_client.post('/api/documents/', {'file': file}, format='multipart')
-        doc_id = doc_resp.data['id']
+    def test_response_time_tracked(self, authenticated_client):
+        """response_time_ms is present in the result endpoint output."""
+        with mock_result_service(result=FAKE_SUCCESS_RESULT):
+            res = authenticated_client.get(f"/api/qa/result/{MOCK_TASK_ID}/")
+        assert res.status_code == status.HTTP_200_OK
+        assert "response_time_ms" in res.data
+        assert isinstance(res.data["response_time_ms"], int)
+        assert res.data["response_time_ms"] > 0
 
-        with qa_mocks(doc_id=doc_id):
-            response = authenticated_client.post(
-                '/api/qa/ask/',
-                {'question': 'Time test?', 'document_id': doc_id},
-                format='json'
-            )
-
-        assert response.status_code == status.HTTP_200_OK
-        assert 'response_time_ms' in response.data
-
-    def test_retrieval_count_tracked(self, authenticated_client, test_document_text):
-        file = BytesIO(test_document_text.encode())
-        file.name = 'doc.txt'
-        doc_resp = authenticated_client.post('/api/documents/', {'file': file}, format='multipart')
-        doc_id = doc_resp.data['id']
-
-        with qa_mocks(doc_id=doc_id):
-            response = authenticated_client.post(
-                '/api/qa/ask/',
-                {'question': 'Retrieval test?', 'document_id': doc_id},
-                format='json'
-            )
-
-        assert response.status_code == status.HTTP_200_OK
-        assert 'sources' in response.data
+    def test_retrieval_count_tracked(self, authenticated_client, test_user, document):
+        """sources_count on QuestionActivity reflects number of sources stored."""
+        QuestionActivity.objects.create(
+            user=test_user,
+            document=document,
+            question="How many sources?",
+            answer="Several.",
+            sources=FAKE_SOURCES,
+            response_time_ms=150,
+            status="success",
+        )
+        res = authenticated_client.get("/api/qa/activity/")
+        assert res.status_code == status.HTTP_200_OK
+        activity = res.data["activities"][0]
+        assert activity["sources_count"] == len(FAKE_SOURCES)

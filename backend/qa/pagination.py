@@ -1,0 +1,45 @@
+from __future__ import annotations
+
+from typing import Any
+
+from rest_framework import status
+from rest_framework.pagination import PageNumberPagination
+from rest_framework.response import Response
+
+
+class QuestionActivityPagination(PageNumberPagination):
+    """
+    Custom paginator for GET /api/qa/activity/.
+
+    Produces the envelope:
+        {
+            "total_questions": <count of filtered queryset>,
+            "questions_today": <today's activity count, user-scoped>,
+            "page":            <current page number>,
+            "page_size":       <effective page size>,
+            "total_pages":     <total page count>,
+            "activities":      [...]
+        }
+    """
+
+    page_size_query_param = "page_size"
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._questions_today: int = 0  # instance attribute — not shared across requests
+
+    def set_questions_today(self, value: int) -> None:
+        self._questions_today = value
+
+    def get_paginated_response(self, data: Any) -> Response:
+        return Response(
+            {
+                "total_questions": self.page.paginator.count,
+                "questions_today": self._questions_today,
+                "page": self.page.number,
+                "page_size": self.get_page_size(self.request),
+                "total_pages": self.page.paginator.num_pages,
+                "activities": data,
+            },
+            status=status.HTTP_200_OK,
+        )

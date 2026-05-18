@@ -1,3 +1,6 @@
+from __future__ import annotations
+from typing import Any
+
 from django.contrib.auth.password_validation import validate_password
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
@@ -5,50 +8,61 @@ from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from .models import User
 
 
-class RegisterSerializer(serializers.ModelSerializer):
-    password = serializers.CharField(
-        write_only=True, required=True, validators=[validate_password]
-    )
-    password_confirm = serializers.CharField(write_only=True, required=True)
+# ---------------------------------------------------------------------------
+# Output
+# ---------------------------------------------------------------------------
+
+class UserOutputSerializer(serializers.ModelSerializer):
+    """Read-only representation of a user — used in all responses."""
 
     class Meta:
         model = User
-        fields = ("username", "email", "password", "password_confirm")
+        fields = ("id", "username", "email", "question_count", "created_at")
+        read_only_fields = fields
+
+
+# ---------------------------------------------------------------------------
+# Input — Register
+# ---------------------------------------------------------------------------
+
+class RegisterInputSerializer(serializers.Serializer):
+    username = serializers.CharField(max_length=150)
+    email = serializers.EmailField()
+    password = serializers.CharField(write_only=True, validators=[validate_password])
+    password_confirm = serializers.CharField(write_only=True)
 
     def validate(self, attrs):
         if attrs["password"] != attrs["password_confirm"]:
             raise serializers.ValidationError({"password": "Passwords do not match."})
-        
-        # Validate email uniqueness
-        if User.objects.filter(email=attrs.get("email")).exists():
-            raise serializers.ValidationError({"email": "This email is already in use."})
-        
         return attrs
 
-    def create(self, validated_data):
-        validated_data.pop("password_confirm")
-        user = User.objects.create_user(**validated_data)
-        return user
 
+# ---------------------------------------------------------------------------
+# Input — Profile update (PATCH /me/)
+# ---------------------------------------------------------------------------
 
-class UserSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = User
-        fields = ("id", "username", "email", "question_count", "created_at")
-        read_only_fields = ("id", "question_count", "created_at")
-    
-    def validate_email(self, value):
-        """Ensure email uniqueness (excluding current user in updates)."""
-        user = self.instance
-        if User.objects.filter(email=value).exclude(pk=user.pk if user else None).exists():
-            raise serializers.ValidationError("This email is already in use.")
-        return value
-
-
-class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
-    """Adds basic user info to the login response alongside the tokens."""
+class UserUpdateInputSerializer(serializers.Serializer):
+    username = serializers.CharField(max_length=150, required=False)
+    email = serializers.EmailField(required=False)
 
     def validate(self, attrs):
-        data = super().validate(attrs)
-        data["user"] = UserSerializer(self.user).data
+        if not attrs:
+            raise serializers.ValidationError("At least one field must be provided.")
+        return attrs
+
+
+# ---------------------------------------------------------------------------
+# Login (extends simplejwt — output only, no write logic)
+# ---------------------------------------------------------------------------
+
+class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
+    """
+    Augments the standard token pair response with basic user data.
+    The view is responsible for moving the refresh token into an HTTP-only cookie;
+    this serializer simply exposes it so the view can extract and strip it.
+    """
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        data: dict[str, Any] = super().validate(attrs)
+        data["user"] = UserOutputSerializer(self.user).data
         return data

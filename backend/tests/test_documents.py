@@ -1,284 +1,303 @@
-"""Tests for the Documents domain (file upload, processing, chunking)."""
+"""Tests for the documents domain — upload, list, detail, delete, status, chunks."""
+from __future__ import annotations
+from django.utils.timezone import now
+from datetime import timedelta
+
 import pytest
+from unittest.mock import patch, MagicMock
+
+from django.db import ProgrammingError
+from django.core.files.uploadedfile import SimpleUploadedFile
 from rest_framework import status
 from rest_framework.test import APIClient
-from io import BytesIO
-from django.test import override_settings
+from rest_framework_simplejwt.tokens import RefreshToken
+
 from documents.models import Document
 
 pytestmark = pytest.mark.django_db
 
 
+# ─────────────────────────────────────────────
+# Helpers
+# ─────────────────────────────────────────────
+
+def _txt_file(name: str = "test.txt", content: bytes = b"hello") -> SimpleUploadedFile:
+    return SimpleUploadedFile(name, content, content_type="text/plain")
+
+
+def _client_for(user) -> APIClient:
+    client = APIClient()
+    token = str(RefreshToken.for_user(user).access_token)
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+    return client
+
+
+# ─────────────────────────────────────────────
+# Upload
+# ─────────────────────────────────────────────
+
 @pytest.mark.documents
 class TestDocumentUpload:
-    """Test document upload functionality."""
-    
-    def test_upload_txt_file(self, authenticated_client, test_document_text):
-        """Test uploading a TXT document."""
-        file = BytesIO(test_document_text.encode())
-        file.name = 'test_doc.txt'
-        
-        response = authenticated_client.post(
-            '/api/documents/',
-            {'file': file},
-            format='multipart'
-        )
-        
+
+    def test_upload_txt_succeeds(self, authenticated_client, test_user, mock_embedding_task):
+        file = _txt_file("doc.txt", b"some content")
+        response = authenticated_client.post("/api/documents/", {"file": file}, format="multipart")
+
         assert response.status_code == status.HTTP_201_CREATED
-        assert response.data['file_name'] == 'test_doc.txt'
-        assert response.data['file_type'] == 'txt'
-        assert response.data['status'] == 'pending'
-        assert Document.objects.filter(file_name='test_doc.txt').exists()
-    
-    def test_upload_requires_authentication(self, api_client, test_document_text):
-        """Test uploading without authentication fails."""
-        file = BytesIO(test_document_text.encode())
-        file.name = 'test_doc.txt'
-        
-        response = api_client.post(
-            '/api/documents/',
-            {'file': file},
-            format='multipart'
+        assert response.data["file_name"] == "doc.txt"
+        assert response.data["file_type"] == "txt"
+        assert response.data["status"] == "pending"
+        assert Document.objects.filter(file_name="doc.txt", user=test_user).exists()
+
+    def test_upload_pdf_succeeds(self, authenticated_client, test_pdf_bytes, mock_embedding_task):
+        file = SimpleUploadedFile("report.pdf", test_pdf_bytes, content_type="application/pdf")
+        response = authenticated_client.post("/api/documents/", {"file": file}, format="multipart")
+
+        assert response.status_code == status.HTTP_201_CREATED
+        assert response.data["file_type"] == "pdf"
+
+    def test_upload_xlsx_succeeds(self, authenticated_client, test_excel_bytes, mock_embedding_task):
+        file = SimpleUploadedFile(
+            "sheet.xlsx",
+            test_excel_bytes,
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
-        
+        response = authenticated_client.post("/api/documents/", {"file": file}, format="multipart")
+
+        assert response.status_code == status.HTTP_201_CREATED
+        assert response.data["file_type"] == "xlsx"
+
+    def test_upload_schedules_embedding_task(
+        self, authenticated_client, mock_embedding_task, django_capture_on_commit_callbacks
+    ):
+        file = _txt_file(content=b"content")
+
+        with django_capture_on_commit_callbacks(execute=True):
+            response = authenticated_client.post("/api/documents/", {"file": file}, format="multipart")
+
+        assert response.status_code == status.HTTP_201_CREATED
+        mock_embedding_task.assert_called_once_with(response.data["id"])
+
+    def test_upload_requires_authentication(self, api_client):
+        file = _txt_file(content=b"content")
+        response = api_client.post("/api/documents/", {"file": file}, format="multipart")
+
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
         assert not Document.objects.exists()
-    
-    def test_upload_unsupported_file_type(self, authenticated_client):
-        """Test uploading unsupported file type fails."""
-        file = BytesIO(b'some binary data')
-        file.name = 'test.exe'
-        
-        response = authenticated_client.post(
-            '/api/documents/',
-            {'file': file},
-            format='multipart'
-        )
-        
-        assert response.status_code in [status.HTTP_400_BAD_REQUEST, status.HTTP_201_CREATED]
-        # File type should be 'unknown' or rejected
-    
+
+    def test_upload_unsupported_extension_rejected(self, authenticated_client):
+        file = SimpleUploadedFile("malware.exe", b"MZ\x90\x00", content_type="application/octet-stream")
+        response = authenticated_client.post("/api/documents/", {"file": file}, format="multipart")
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert not Document.objects.exists()
+
     def test_upload_empty_file_rejected(self, authenticated_client):
-        """Test uploading empty file fails."""
-        file = BytesIO(b'')
-        file.name = 'empty.txt'
-        
-        response = authenticated_client.post(
-            '/api/documents/',
-            {'file': file},
-            format='multipart'
-        )
-        
-        # May succeed but with 0 size warning
-        assert response.status_code in [status.HTTP_201_CREATED, status.HTTP_400_BAD_REQUEST]
-    
-    def test_upload_large_file_handling(self, authenticated_client):
-        """Test handling of large file uploads."""
-        # Create a 5MB file
-        large_content = b'x' * (5 * 1024 * 1024)
-        file = BytesIO(large_content)
-        file.name = 'large.txt'
-        
-        # Should either succeed or be rejected based on settings
-        response = authenticated_client.post(
-            '/api/documents/',
-            {'file': file},
-            format='multipart'
-        )
-        
-        assert response.status_code in [status.HTTP_201_CREATED, status.HTTP_413_REQUEST_ENTITY_TOO_LARGE]
+        file = _txt_file(content=b"")
+        response = authenticated_client.post("/api/documents/", {"file": file}, format="multipart")
 
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert not Document.objects.exists()
+
+    def test_upload_document_belongs_to_requesting_user(self, authenticated_client, test_user, mock_embedding_task):
+        file = _txt_file(content=b"content")
+        response = authenticated_client.post("/api/documents/", {"file": file}, format="multipart")
+
+        doc = Document.objects.get(id=response.data["id"])
+        assert doc.user_id == test_user.id
+
+
+# ─────────────────────────────────────────────
+# List + Filtering
+# ─────────────────────────────────────────────
 
 @pytest.mark.documents
-class TestDocumentListing:
-    """Test document listing and filtering."""
-    
-    def test_list_user_documents(self, authenticated_client, test_user, test_document_text):
-        """Test user can list their own documents."""
-        # Create a document first
-        file = BytesIO(test_document_text.encode())
-        file.name = 'doc1.txt'
-        authenticated_client.post('/api/documents/', {'file': file}, format='multipart')
-        
-        # List documents
-        response = authenticated_client.get('/api/documents/')
-        
+class TestDocumentList:
+
+    def test_list_returns_only_own_documents(self, authenticated_client, test_user, second_user, make_document):
+        make_document(file_name="mine.pdf", user=test_user)
+        make_document(file_name="theirs.pdf", user=second_user)
+
+        response = authenticated_client.get("/api/documents/")
+
         assert response.status_code == status.HTTP_200_OK
-        assert len(response.data['results']) >= 1
-        assert response.data['results'][0]['file_name'] == 'doc1.txt'
-    
-    def test_list_documents_requires_auth(self, api_client):
-        """Test listing documents requires authentication."""
-        response = api_client.get('/api/documents/')
-        
+        names = [d["file_name"] for d in response.data["results"]]
+        assert "mine.pdf" in names
+        assert "theirs.pdf" not in names
+
+    def test_list_requires_authentication(self, api_client):
+        response = api_client.get("/api/documents/")
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
-    
-    def test_user_cannot_see_other_users_documents(self, authenticated_client, second_user, test_document_text):
-        """Test user isolation - cannot see other user's docs."""
-        # Create document as first user
-        file = BytesIO(test_document_text.encode())
-        file.name = 'private_doc.txt'
-        authenticated_client.post('/api/documents/', {'file': file}, format='multipart')
-        
-        # Login as second user and try to see documents
-        client2 = APIClient()
-        from rest_framework_simplejwt.tokens import RefreshToken
-        refresh = RefreshToken.for_user(second_user)
-        client2.credentials(HTTP_AUTHORIZATION=f'Bearer {str(refresh.access_token)}')
-        
-        response = client2.get('/api/documents/')
-        
-        # Second user should not see first user's document
-        doc_names = [d['file_name'] for d in response.data.get('results', [])]
-        assert 'private_doc.txt' not in doc_names
-    
-    def test_filter_documents_by_status(self, authenticated_client, test_document_text):
-        """Test filtering documents by status."""
-        file = BytesIO(test_document_text.encode())
-        file.name = 'test.txt'
-        authenticated_client.post('/api/documents/', {'file': file}, format='multipart')
-        
-        # Filter by pending status
-        response = authenticated_client.get('/api/documents/?status=pending')
-        
-        assert response.status_code == status.HTTP_200_OK
-        # Should find our pending document
-    
-    def test_search_documents_by_name(self, authenticated_client, test_document_text):
-        """Test searching documents by filename."""
-        # Upload two documents
-        for name in ['report.txt', 'analysis.txt']:
-            file = BytesIO(test_document_text.encode())
-            file.name = name
-            authenticated_client.post('/api/documents/', {'file': file}, format='multipart')
-        
-        # Search for 'report'
-        response = authenticated_client.get('/api/documents/?search=report')
-        
-        assert response.status_code == status.HTTP_200_OK
-        found_names = [d['file_name'] for d in response.data.get('results', [])]
-        assert 'report.txt' in found_names
 
+    def test_list_ordered_by_upload_date_descending(self, authenticated_client, test_user, make_document):
+       
+        make_document(file_name="old.pdf", user=test_user, created_at=now() - timedelta(seconds=10))
+        make_document(file_name="new.pdf", user=test_user, created_at=now())
+
+        response = authenticated_client.get("/api/documents/")
+
+        names = [d["file_name"] for d in response.data["results"]]
+        assert names.index("new.pdf") < names.index("old.pdf")
+
+    def test_filter_by_status(self, authenticated_client, test_user, make_document):
+        make_document(file_name="done.pdf", status="completed", user=test_user)
+        make_document(file_name="waiting.pdf", status="pending", user=test_user)
+
+        response = authenticated_client.get("/api/documents/?status=completed")
+
+        assert response.status_code == status.HTTP_200_OK
+        names = [d["file_name"] for d in response.data["results"]]
+        assert names == ["done.pdf"]
+
+    def test_filter_by_file_type(self, authenticated_client, test_user, make_document):
+        make_document(file_name="a.pdf", file_type="pdf", user=test_user)
+        make_document(file_name="b.txt", file_type="txt", user=test_user)
+
+        response = authenticated_client.get("/api/documents/?file_type=pdf")
+
+        assert response.status_code == status.HTTP_200_OK
+        names = [d["file_name"] for d in response.data["results"]]
+        assert names == ["a.pdf"]
+
+    def test_search_by_file_name(self, authenticated_client, test_user, make_document):
+        make_document(file_name="annual_report.pdf", user=test_user)
+        make_document(file_name="budget.xlsx", user=test_user)
+
+        response = authenticated_client.get("/api/documents/?search=annual")
+
+        assert response.status_code == status.HTTP_200_OK
+        names = [d["file_name"] for d in response.data["results"]]
+        assert names == ["annual_report.pdf"]
+
+    def test_invalid_status_filter_returns_400(self, authenticated_client):
+        response = authenticated_client.get("/api/documents/?status=nonexistent")
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_invalid_file_type_filter_returns_400(self, authenticated_client):
+        response = authenticated_client.get("/api/documents/?file_type=exe")
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_list_is_paginated(self, authenticated_client, test_user, make_document):
+        for i in range(25):
+            make_document(file_name=f"doc_{i}.pdf", user=test_user)
+
+        response = authenticated_client.get("/api/documents/")
+
+        assert "results" in response.data
+        assert "count" in response.data
+        assert len(response.data["results"]) <= 20
+
+
+# ─────────────────────────────────────────────
+# Retrieve + Delete
+# ─────────────────────────────────────────────
 
 @pytest.mark.documents
-class TestDocumentDetail:
-    """Test document detail and status checking."""
-    
-    def test_get_document_detail(self, authenticated_client, test_document_text):
-        """Test retrieving document detail."""
-        # Upload document
-        file = BytesIO(test_document_text.encode())
-        file.name = 'test.txt'
-        create_resp = authenticated_client.post('/api/documents/', {'file': file}, format='multipart')
-        doc_id = create_resp.data['id']
-        
-        # Get detail
-        response = authenticated_client.get(f'/api/documents/{doc_id}/')
-        
+class TestDocumentRetrieveDestroy:
+
+    def test_retrieve_own_document(self, authenticated_client, test_user, make_document):
+        doc = make_document(user=test_user)
+        response = authenticated_client.get(f"/api/documents/{doc.id}/")
+
         assert response.status_code == status.HTTP_200_OK
-        assert response.data['file_name'] == 'test.txt'
-    
-    def test_get_document_status(self, authenticated_client, test_document_text):
-        """Test retrieving document processing status."""
-        file = BytesIO(test_document_text.encode())
-        file.name = 'test.txt'
-        create_resp = authenticated_client.post('/api/documents/', {'file': file}, format='multipart')
-        doc_id = create_resp.data['id']
-        
-        response = authenticated_client.get(f'/api/documents/{doc_id}/status/')
-        
+        assert response.data["id"] == str(doc.id)
+        assert response.data["file_name"] == doc.file_name
+
+    def test_retrieve_returns_core_fields_only(self, authenticated_client, test_user, make_document):
+        doc = make_document(user=test_user)
+        response = authenticated_client.get(f"/api/documents/{doc.id}/")
+
+        assert set(response.data.keys()) == {"id", "file_name", "file_type", 'status'}
+
+    def test_retrieve_other_users_document_returns_404(self, authenticated_client, second_user, make_document):
+        doc = make_document(user=second_user)
+        response = authenticated_client.get(f"/api/documents/{doc.id}/")
+
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+
+    def test_delete_own_document(self, authenticated_client, test_user, make_document):
+        doc = make_document(user=test_user)
+        response = authenticated_client.delete(f"/api/documents/{doc.id}/")
+
         assert response.status_code == status.HTTP_200_OK
-        assert 'status' in response.data
-        assert response.data['status'] in ['pending', 'processing', 'completed', 'failed']
-    
-    def test_user_cannot_access_other_users_document(self, authenticated_client, second_user, test_document_text):
-        """Test user cannot access other user's document detail."""
-        # Create document as first user
-        file = BytesIO(test_document_text.encode())
-        file.name = 'private.txt'
-        create_resp = authenticated_client.post('/api/documents/', {'file': file}, format='multipart')
-        doc_id = create_resp.data['id']
-        
-        # Try to access as second user
-        client2 = APIClient()
-        from rest_framework_simplejwt.tokens import RefreshToken
-        refresh = RefreshToken.for_user(second_user)
-        client2.credentials(HTTP_AUTHORIZATION=f'Bearer {str(refresh.access_token)}')
-        
-        response = client2.get(f'/api/documents/{doc_id}/')
-        
+        assert response.data["details"]["id"] == str(doc.id)
+        assert response.data["details"]["file_name"] == doc.file_name
+        assert not Document.objects.filter(id=doc.id).exists()
+
+    def test_delete_other_users_document_returns_404(self, authenticated_client, second_user, make_document):
+        doc = make_document(user=second_user)
+        response = authenticated_client.delete(f"/api/documents/{doc.id}/")
+
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+        assert Document.objects.filter(id=doc.id).exists()
+
+    def test_retrieve_nonexistent_document_returns_404(self, authenticated_client):
+        import uuid
+        response = authenticated_client.get(f"/api/documents/{uuid.uuid4()}/")
         assert response.status_code == status.HTTP_404_NOT_FOUND
 
 
+# ─────────────────────────────────────────────
+# Status
+# ─────────────────────────────────────────────
+
 @pytest.mark.documents
-class TestDocumentDeletion:
-    """Test document deletion."""
-    
-    def test_delete_own_document(self, authenticated_client, test_document_text):
-        """Test user can delete their own document."""
-        # Create document
-        file = BytesIO(test_document_text.encode())
-        file.name = 'delete_me.txt'
-        create_resp = authenticated_client.post('/api/documents/', {'file': file}, format='multipart')
-        doc_id = create_resp.data['id']
-        
-        # Delete it
-        response = authenticated_client.delete(f'/api/documents/{doc_id}/')
-        
+class TestDocumentStatus:
+
+    def test_status_returns_all_fields(self, authenticated_client, test_user, make_document):
+        doc = make_document(user=test_user, status="pending")
+        response = authenticated_client.get(f"/api/documents/{doc.id}/status/")
+
         assert response.status_code == status.HTTP_200_OK
-        assert not Document.objects.filter(id=doc_id).exists()
-    
-    def test_delete_requires_ownership(self, authenticated_client, second_user, test_document_text):
-        """Test cannot delete other user's document."""
-        # Create as first user
-        file = BytesIO(test_document_text.encode())
-        file.name = 'protected.txt'
-        create_resp = authenticated_client.post('/api/documents/', {'file': file}, format='multipart')
-        doc_id = create_resp.data['id']
-        
-        # Try to delete as second user
-        client2 = APIClient()
-        from rest_framework_simplejwt.tokens import RefreshToken
-        refresh = RefreshToken.for_user(second_user)
-        client2.credentials(HTTP_AUTHORIZATION=f'Bearer {str(refresh.access_token)}')
-        
-        response = client2.delete(f'/api/documents/{doc_id}/')
-        
+        assert set(response.data.keys()) >= {"id", "file_name", "status", "created_at", "status_description"}
+
+    @pytest.mark.parametrize("doc_status,expected_description", [
+        ("pending", "Waiting to be processed"),
+        ("processing", "Extracting text and generating embeddings..."),
+        ("completed", "Ready for Q&A"),
+        ("failed", "Processing failed. Check file format or logs."),
+    ])
+    def test_status_description_matches_state(
+        self, authenticated_client, test_user, make_document, doc_status, expected_description
+    ):
+        doc = make_document(user=test_user, status=doc_status)
+        response = authenticated_client.get(f"/api/documents/{doc.id}/status/")
+
+        assert response.data["status"] == doc_status
+        assert response.data["status_description"] == expected_description
+
+    def test_status_other_users_document_returns_404(self, authenticated_client, second_user, make_document):
+        doc = make_document(user=second_user)
+        response = authenticated_client.get(f"/api/documents/{doc.id}/status/")
+
         assert response.status_code == status.HTTP_404_NOT_FOUND
-        assert Document.objects.filter(id=doc_id).exists()
 
+    def test_include_chunks_false_omits_chunk_fields(self, authenticated_client, test_user, make_document):
+        doc = make_document(user=test_user, status="completed")
+        response = authenticated_client.get(f"/api/documents/{doc.id}/status/")
 
-@pytest.mark.documents
-class TestChunkVerification:
-    """Test chunk verification endpoint."""
-    
-    def test_verify_chunks_stored(self, authenticated_client, test_document_text):
-        """Test that chunks are verified in vector DB."""
-        # Upload document
-        file = BytesIO(test_document_text.encode())
-        file.name = 'test.txt'
-        create_resp = authenticated_client.post('/api/documents/', {'file': file}, format='multipart')
-        doc_id = create_resp.data['id']
-        
-        # Check chunks
-        response = authenticated_client.get(f'/api/documents/{doc_id}/chunks/')
-        
+        assert "total_chunks" not in response.data
+        assert "chunks" not in response.data
+
+    def test_include_chunks_true_adds_chunk_fields(self, authenticated_client, test_user, make_document):
+        doc = make_document(user=test_user, status="completed")
+
+        mock_cursor = MagicMock()
+        mock_cursor.__enter__ = MagicMock(side_effect=ProgrammingError("langchain_pg_embedding"))
+        mock_cursor.__exit__ = MagicMock(return_value=False)
+
+        with patch("documents.services.document.connection") as mock_connection:
+            mock_connection.cursor.return_value = mock_cursor
+
+            response = authenticated_client.get(f"/api/documents/{doc.id}/status/?include_chunks=true")
+
         assert response.status_code == status.HTTP_200_OK
-        # May be empty if Ollama not available, but endpoint should work
-        assert 'total_chunks_found' in response.data
-    
-    def test_chunks_have_proper_metadata(self, authenticated_client, test_document_text):
-        """Test chunks have correct metadata."""
-        file = BytesIO(test_document_text.encode())
-        file.name = 'test.txt'
-        create_resp = authenticated_client.post('/api/documents/', {'file': file}, format='multipart')
-        doc_id = create_resp.data['id']
-        
-        response = authenticated_client.get(f'/api/documents/{doc_id}/chunks/')
-        
-        if response.data['total_chunks_found'] > 0:
-            chunk = response.data['chunks'][0]
-            assert 'metadata' in chunk
-            assert 'document_id' in chunk['metadata']
-            assert 'user_id' in chunk['metadata']
-            assert 'file_name' in chunk['metadata']
+        assert response.data["total_chunks"] == 0
+        assert response.data["chunks"] == []
+
+    def test_include_chunks_invalid_value_treated_as_false(self, authenticated_client, test_user, make_document):
+        doc = make_document(user=test_user, status="completed")
+        response = authenticated_client.get(f"/api/documents/{doc.id}/status/?include_chunks=yes")
+
+        assert response.status_code == status.HTTP_200_OK
+        assert "total_chunks" not in response.data

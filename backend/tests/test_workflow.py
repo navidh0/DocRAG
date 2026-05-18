@@ -40,14 +40,18 @@ class TestAuthentication:
     def test_logout_user(self):
         client = APIClient()
         user = User.objects.create_user(username=generate_unique_username(), password="SecurePass123!")
+        
         login_res = client.post('/api/auth/login/', {
             "username": user.username,
             "password": "SecurePass123!"
         })
+        assert login_res.status_code == 200
+
         access_token = login_res.data['access']
-        refresh_token = login_res.data['refresh']
         client.credentials(HTTP_AUTHORIZATION=f'Bearer {access_token}')
-        res = client.post('/api/auth/logout/', {"refresh": refresh_token})
+        
+        # refresh token is in cookie — client sends it automatically
+        res = client.post('/api/auth/logout/')
         assert res.status_code == 200
 
     def test_me_endpoint(self):
